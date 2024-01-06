@@ -4,11 +4,14 @@ import (
 	"flag"
 	"fmt"
 	"go.etcd.io/etcd/raft/v3/raftpb"
+	"runtime"
 	"strings"
 )
 
 func main() {
 
+	gomaxprocs := runtime.GOMAXPROCS(8)
+	fmt.Println(gomaxprocs)
 	fmt.Println("Hello, World!")
 
 	cluster := flag.String("cluster", "http://127.0.0.1:9021", "comma separated cluster peers")
