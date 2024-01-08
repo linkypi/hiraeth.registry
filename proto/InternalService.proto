@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option go_package = "github.com/linkypi/hiraeth.registry/proto";
+
+service InternalService {
+  rpc GetNodeInfo(NodeInfoRequest) returns (NodeInfoResponse) {}
+}
+
+// Bring the current node information
+message NodeInfoRequest {
+  uint32 nodeId = 1;
+  string nodeIp = 2;
+  uint32 internalPort = 3;
+}
+
+// Reply to the current node information
+message NodeInfoResponse {
+  uint32 nodeId = 1;
+  string nodeIp = 2;
+  uint32 internalPort = 3;
+}
