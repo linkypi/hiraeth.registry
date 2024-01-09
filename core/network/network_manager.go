@@ -1,6 +1,8 @@
 package network
 
 import (
+	"github.com/linkypi/hiraeth.registry/config"
+	"google.golang.org/grpc/connectivity"
 	"sync"
 	"time"
 
@@ -32,19 +34,41 @@ type conn struct {
 	// just for raft NodeInfo communications
 	raftClient pb.RaftTransportClient
 	// just for cluster server NodeInfo communications
-	internalClient pb.InternalServiceClient
+	internalClient pb.ClusterServiceClient
 	mtx            sync.Mutex
 }
 
-func (manager *NetworkManager) GetRaftClient(id raft.ServerID) (pb.RaftTransportClient, error) {
-	return manager.Connections[id].raftClient, nil
+func (manager *NetworkManager) GetConnectedNodes(clusterServers map[string]config.NodeInfo) []config.NodeInfo {
+	arr := make([]config.NodeInfo, 0, 8)
+	for _, node := range clusterServers {
+		_, ok := manager.Connections[raft.ServerID(node.Id)]
+		if ok {
+			arr = append(arr, node)
+		}
+	}
+	return arr
 }
 
-func (manager *NetworkManager) GetInternalClient(id raft.ServerID) pb.InternalServiceClient {
+func (manager *NetworkManager) GetRaftClient(id raft.ServerID) (pb.RaftTransportClient, error) {
+	con, ok := manager.Connections[id]
+	if ok {
+		return con.raftClient, nil
+	}
+	return nil, errors.New(string("connection not exist, id: " + id))
+}
+
+func (manager *NetworkManager) GetInternalClient(id raft.ServerID) pb.ClusterServiceClient {
 	return manager.Connections[id].internalClient
 }
 
-func (manager *NetworkManager) AddConn(id raft.ServerID, grpcConn *grpc.ClientConn, internalServClient pb.InternalServiceClient) {
+func (manager *NetworkManager) IsConnected(id raft.ServerID) bool {
+	grpcConn := manager.Connections[id].grpcConn
+	state := grpcConn.GetState()
+	return state == connectivity.Ready || state == connectivity.Idle
+}
+
+func (manager *NetworkManager) AddConn(id raft.ServerID, grpcConn *grpc.ClientConn,
+	internalServClient pb.ClusterServiceClient, raftClient pb.RaftTransportClient) {
 	manager.ConnectionsMtx.Lock()
 	c, ok := manager.Connections[id]
 	if !ok {
@@ -57,11 +81,14 @@ func (manager *NetworkManager) AddConn(id raft.ServerID, grpcConn *grpc.ClientCo
 		c.mtx.Lock()
 	}
 	defer c.mtx.Unlock()
-	if c.grpcConn == nil {
+	if grpcConn != nil {
 		c.grpcConn = grpcConn
 	}
-	if c.internalClient == nil {
+	if internalServClient != nil {
 		c.internalClient = internalServClient
+	}
+	if raftClient != nil {
+		c.raftClient = raftClient
 	}
 }
 

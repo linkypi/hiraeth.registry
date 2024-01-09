@@ -11,16 +11,6 @@ import (
 	"strings"
 )
 
-type NodeConfig struct {
-	SelfNode NodeInfo
-	// cluster server node info, include candidate node and observer node
-	ClusterServers           map[string]NodeInfo
-	OtherCandidateNodes      []NodeInfo
-	ClusterHeartbeatInterval int
-	DataDir                  string
-	LogDir                   string
-}
-
 func (nc *NodeConfig) UpdateRemoteNode(remoteNode NodeInfo, throwEx bool) {
 
 	if remoteNode.Id == nc.SelfNode.Id {
@@ -59,7 +49,7 @@ func (nc *NodeConfig) UpdateRemoteNode(remoteNode NodeInfo, throwEx bool) {
 }
 
 // get other candidate servers, exclude self node
-func (nc *NodeConfig) getOtherCandidateServers() []NodeInfo {
+func (nc *NodeConfig) GetOtherCandidateServers() []NodeInfo {
 	var filtered []NodeInfo
 	for _, node := range nc.ClusterServers {
 		if node.IsCandidate {
@@ -69,111 +59,23 @@ func (nc *NodeConfig) getOtherCandidateServers() []NodeInfo {
 	return filtered
 }
 
+func (nc *NodeConfig) GetOtherNodes() []NodeInfo {
+	var filtered = make([]NodeInfo, 0, 8)
+	for _, node := range nc.ClusterServers {
+		if node.Id != nc.SelfNode.Id {
+			filtered = append(filtered, node)
+		}
+	}
+	return filtered
+}
+
 var properties = make([]property, 0, 16)
 var log *logrus.Logger
 
-type internalConfig struct {
-	NodeId           string
-	NodeIp           string
-	NodeInternalPort int
-	ClientHttpPort   int
-	ClientTcpPort    int
-
-	IsCandidate              bool
-	ClusterServers           []string
-	ClusterHeartbeatInterval int
-
-	DataDir string
-	LogDir  string
-}
-
-// server node Info
-type NodeInfo struct {
-	Id               string
-	Ip               string
-	InternalPort     int
-	Addr             string
-	externalHttpPort int
-	externalTcpPort  int
-	IsCandidate      bool
-}
-
-type property struct {
-	key          string
-	propName     string
-	dataType     string
-	require      bool
-	defaultVal   any
-	parseHandler func(val string) any
-}
-
-const (
-	NodeId                   = "node.id"
-	NodeIp                   = "node.ip"
-	NodeInternalPort         = "node.internal.port"
-	IsCandidate              = "node.is.candidate"
-	ClusterServerAddr        = "cluster.server.addr"
-	ClusterHeartbeatInterval = "cluster.heartbeat.interval"
-	ClientHttpPort           = "client.http.port"
-	ClientTcpPort            = "client.tcp.port"
-	DataDir                  = "data.dir"
-	LogDir                   = "log.dir"
-)
-
-func init() {
-	properties = append(properties, property{
-		dataType:     "int",
-		propName:     "NodeId",
-		key:          NodeId,
-		require:      true,
-		defaultVal:   nil,
-		parseHandler: validateNumber,
-	})
-	properties = append(properties, property{
-		dataType:     "string",
-		propName:     "NodeIp",
-		key:          NodeIp,
-		require:      true,
-		defaultVal:   nil,
-		parseHandler: validateIP,
-	})
-	properties = append(properties, property{
-		dataType:   "int",
-		propName:   "NodeInternalPort",
-		key:        NodeInternalPort,
-		require:    false,
-		defaultVal: 2661})
-	properties = append(properties, property{
-		dataType:   "bool",
-		propName:   "IsCandidate",
-		key:        IsCandidate,
-		require:    false,
-		defaultVal: true})
-	properties = append(properties, property{
-		dataType:     "string",
-		propName:     "ClusterServers",
-		key:          ClusterServerAddr,
-		parseHandler: parseClusterServers,
-		require:      true,
-		defaultVal:   nil})
-	properties = append(properties, property{
-		dataType:     "int",
-		propName:     "ClusterHeartbeatInterval",
-		key:          ClusterHeartbeatInterval,
-		parseHandler: validateNumber,
-		require:      false,
-		defaultVal:   5})
-	properties = append(properties, property{dataType: "int", propName: "ClientHttpPort", key: ClientHttpPort, require: false, defaultVal: 5042})
-	properties = append(properties, property{dataType: "int", propName: "ClientTcpPort", key: ClientTcpPort, require: false, defaultVal: 5386})
-	properties = append(properties, property{dataType: "string", propName: "DataDir", key: DataDir, require: false, defaultVal: "./data"})
-	properties = append(properties, property{dataType: "string", propName: "LogDir", key: LogDir, require: false, defaultVal: "./log"})
-}
-
 func validateNumber(id string) any {
-	clusterRegexCompile := regexp.MustCompile("d+")
+	clusterRegexCompile := regexp.MustCompile("\\d+")
 	match := clusterRegexCompile.MatchString(id)
 	if !match {
-
 		log.Error("property " + NodeId + " value is invalid: " + id)
 		os.Exit(1)
 	}
@@ -230,7 +132,7 @@ func ParseConfig(filePath string, logger *logrus.Logger) NodeConfig {
 	}
 
 	config := NodeConfig{}
-	currentNode := NodeInfo{
+	selfNode := NodeInfo{
 		Id:               interConfig.NodeId,
 		Ip:               interConfig.NodeIp,
 		Addr:             interConfig.NodeIp + ":" + strconv.Itoa(interConfig.NodeInternalPort),
@@ -239,16 +141,17 @@ func ParseConfig(filePath string, logger *logrus.Logger) NodeConfig {
 		externalTcpPort:  interConfig.ClientTcpPort,
 		InternalPort:     interConfig.NodeInternalPort,
 	}
-	config.SelfNode = currentNode
+	config.SelfNode = selfNode
 	config.ClusterServers = make(map[string]NodeInfo)
-	config.ClusterServers[currentNode.Id] = currentNode
+	config.ClusterServers[selfNode.Id] = selfNode
 
 	config.LogDir = interConfig.LogDir
 	config.DataDir = interConfig.DataDir
 	config.ClusterHeartbeatInterval = interConfig.ClusterHeartbeatInterval
+	config.ClusterQuorumCount = interConfig.ClusterQuorumCount
 
 	for _, server := range interConfig.ClusterServers {
-		if server == currentNode.Addr {
+		if server == selfNode.Addr {
 			continue
 		}
 		parts := strings.Split(server, ":")
@@ -275,8 +178,13 @@ func ParseConfig(filePath string, logger *logrus.Logger) NodeConfig {
 func setConfigProperty(config *internalConfig, prop property, val string) {
 	elems := reflect.ValueOf(config).Elem()
 	field := elems.FieldByName(prop.propName)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("config value of property [%s] is invalid: %s, %v", prop.propName, val, r)
+			os.Exit(1)
+		}
+	}()
 	if field.IsValid() && field.CanSet() {
-
 		if field.Kind() == reflect.Array && prop.parseHandler != nil {
 			newValues := prop.parseHandler(val)
 			field.Set(reflect.ValueOf(newValues))
@@ -306,16 +214,15 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 				return
 			}
 			if prop.parseHandler != nil {
-				v := prop.parseHandler(val)
-				field.Set(reflect.ValueOf(v))
-				return
+				prop.parseHandler(val)
 			}
 			intVal, err := strconv.ParseInt(strVal, 10, 64)
 			if err != nil {
 				log.Errorf("property %s default value is invalid: %s", prop.key, strVal)
 				os.Exit(1)
 			}
-			field.SetInt(intVal)
+			ret := reflect.ValueOf(intVal)
+			field.Set(ret.Convert(field.Type()))
 
 		case "bool":
 			strVal := val
@@ -335,6 +242,9 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 				os.Exit(1)
 			}
 			field.SetBool(bVal)
+		default:
+			ret := reflect.ValueOf(val)
+			field.Set(ret.Convert(field.Type()))
 		}
 	}
 }

@@ -11,6 +11,23 @@
 当然还有部分功能需要自行实现, 如集群启动时并没有提供各个节点发现功能, 而需要raftadmin来处理. 同时 LeaderCh 是 bool 类型的 channel，不带缓存，当本节点的 leader 状态有变化的时候，会往这个 channel 里面写数据，但是由于不带缓冲且写数据的协程不会阻塞在这里，有可能会写入失败，没有及时变更状态，所以使用 leaderCh 的可靠性不能保证。好在 raft Config 里面提供了另一个 channel NotifyCh，它是带缓存的，当 leader 状态变化时会往这个 chan 写数据，写入的变更消息能够缓存在 channel 里面，应用程序能够通过它获取到最新的状态变化。
 
 
+### 集群启动流程
+每个节点启动后都会尝试从给定的集群节点中建立长连接，待连接都建立完成后开始互换节点信息。互换节点信息完成便可以开始启动 Raft 来选举集群 Leader，在开始的实现中必须等到集群所有节点都互连完成后才进入Leader选举阶段，但此实现过于死板，实际并不需要所有节点都连接完成才开始选举。可根据系统适用场景区分，如用作分布式配置中心则需要较高的一致性，必须保证大多数节点在线。故系统提供了 cluster.quorum.count 来指定集群选举所需要的最小节点数。
+
+raft启动需注意区分当前系统是否已有数据，有数据则恢复集群，否则新建集群：
+```golang
+    state, err := raft.HasExistingState(ldb, sdb, fss)
+	if state && err == nil {
+		rn.log.Info("raft cluster already exists, restore cluster instead.")
+		err := raft.RecoverCluster(conf, fsm, ldb, sdb, fss, rn.transport(), cfg)
+		if err != nil {
+			return r, err
+		}
+		return r, nil
+	}
+
+	f := r.BootstrapCluster(cfg)
+```
 
 ``` sh
  protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=require_unimplemented_servers=false InternalService.proto 
