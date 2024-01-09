@@ -1,4 +1,4 @@
-package core
+package network
 
 import (
 	"sync"
@@ -29,9 +29,9 @@ var (
 
 type conn struct {
 	grpcConn *grpc.ClientConn
-	// just for raft node communications
+	// just for raft NodeInfo communications
 	raftClient pb.RaftTransportClient
-	// just for cluster server node communications
+	// just for cluster server NodeInfo communications
 	internalClient pb.InternalServiceClient
 	mtx            sync.Mutex
 }

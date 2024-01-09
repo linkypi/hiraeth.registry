@@ -4,47 +4,52 @@ import (
 	"context"
 	"github.com/hashicorp/raft"
 	"github.com/linkypi/hiraeth.registry/config"
+	network "github.com/linkypi/hiraeth.registry/core/network"
 	raftx "github.com/linkypi/hiraeth.registry/core/raft"
+	"github.com/linkypi/hiraeth.registry/core/service"
 	pb "github.com/linkypi/hiraeth.registry/proto"
-	"github.com/linkypi/hiraeth.registry/service"
 	"github.com/sirupsen/logrus"
+	"github.com/sourcegraph/conc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"net"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 )
 
 type Node struct {
-	log          *logrus.Logger
-	serverConfig config.ServerConfig
-	network      *NetworkManager
-	raft         *raft.Raft
+	log     *logrus.Logger
+	Config  config.NodeConfig
+	network *network.NetworkManager
+	raft    *raft.Raft
 
-	socket     net.Listener
-	grpcServer *grpc.Server
-	shutDownCh chan struct{}
+	socket         net.Listener
+	grpcServer     *grpc.Server
+	shutDownCh     chan struct{}
+	notifyLeaderCh chan bool
 }
 
-func NewNode(serverConfig config.ServerConfig, logger *logrus.Logger) *Node {
-	return &Node{serverConfig: serverConfig, log: logger}
+func NewNode(serverConfig config.NodeConfig, logger *logrus.Logger) *Node {
+	return &Node{Config: serverConfig, log: logger}
 }
 
 func (n *Node) Start() {
 
 	n.startGRPCServer()
 
-	n.network = NewNetworkManager(raft.ServerAddress(n.serverConfig.CurrentNode.Addr))
+	n.network = network.NewNetworkManager(raft.ServerAddress(n.Config.SelfNode.Addr))
 	// Try connecting to other candidate nodes
-	var connWg sync.WaitGroup
-	go n.connectToOtherCandidates(n.serverConfig, &connWg)
-	connWg.Wait()
+	n.waitAllTheOtherCandidateConnected()
+
+	// obtain information about other nodes to prepare for bootstrap the cluster
+	n.obtainOtherNodeInfo()
 
 	//  start the raft server
 	go n.startRaftNode()
+
+	go monitorLeaderChanged(n.raft.LeaderCh(), n.notifyLeaderCh, n.log)
 
 	select {
 	case <-n.shutDownCh:
@@ -56,10 +61,20 @@ func (n *Node) startRaftNode() {
 	raftNode := raftx.RaftNode{}
 	raftNode.SetNetWorkManager(n.network)
 
-	currentNode := n.serverConfig.CurrentNode
+	selfNode := n.Config.SelfNode
 	propFsm := &raftx.PropFsm{}
-	raftFsm, err := raftNode.StartRaftNode(strconv.Itoa(currentNode.Id),
-		currentNode.Addr, n.serverConfig.LogDir, n.grpcServer, propFsm)
+
+	var peers = make([]raft.Server, 3)
+	for _, node := range n.Config.ClusterServers {
+		server := raft.Server{
+			ID:      raft.ServerID(node.Id),
+			Address: raft.ServerAddress(node.Addr),
+		}
+		peers = append(peers, server)
+	}
+
+	raftFsm, err := raftNode.StartRaftNode(selfNode.Id, n.Config.LogDir,
+		peers, n.grpcServer, n.notifyLeaderCh, propFsm)
 	if err != nil {
 		n.log.Errorf("failed to start raft node: %v", err)
 		n.shutDownCh <- struct{}{}
@@ -69,8 +84,23 @@ func (n *Node) startRaftNode() {
 	n.log.Infof("raft node started.")
 }
 
+// monitor leader changes
+func monitorLeaderChanged(leaderCh <-chan bool, notifyCh chan bool, log *logrus.Logger) {
+	for {
+		select {
+		case leader := <-leaderCh:
+			log.Info("leader changed to %s", leader)
+			// do something
+		case changed := <-notifyCh:
+			log.Info("leader has changed", changed)
+		}
+
+	}
+
+}
+
 func (n *Node) startGRPCServer() {
-	sock, err := net.Listen("tcp", n.serverConfig.CurrentNode.Addr)
+	sock, err := net.Listen("tcp", n.Config.SelfNode.Addr)
 	if err != nil {
 		n.log.Errorf("failed to listen: %v", err)
 		panic(err)
@@ -90,13 +120,13 @@ func (n *Node) startGRPCServer() {
 		// Allow 5 seconds for pending RPCs to complete before forcibly closing connections
 		MaxConnectionAgeGrace: 5 * time.Second,
 		// Ping the client if it is idle for 5 seconds to ensure the connection is still active
-		Time: time.Duration(n.serverConfig.ClusterHeartbeatInterval) * time.Second,
+		Time: time.Duration(n.Config.ClusterHeartbeatInterval) * time.Second,
 		// Wait 1 second for the ping ack before assuming the connection is dead
 		Timeout: 1 * time.Second,
 	}
 
 	grpcServer := grpc.NewServer(grpc.KeepaliveEnforcementPolicy(kaep), grpc.KeepaliveParams(kasp))
-	pb.RegisterInternalServiceServer(grpcServer, &service.InternalServiceServer{ServerConfig: n.serverConfig})
+	service.RegisterRpcService(grpcServer, n.Config)
 
 	n.grpcServer = grpcServer
 	reflection.Register(grpcServer)
@@ -115,49 +145,89 @@ func (n *Node) Shutdown() {
 	close(n.shutDownCh)
 }
 
-func (n *Node) connectToOtherCandidates(config config.ServerConfig, connWg *sync.WaitGroup) {
-	for _, node := range config.OtherCandidateNodes {
-		connWg.Add(1)
-		node := node
-		go func() {
-			retries := 1
-			for {
-				var kacp = keepalive.ClientParameters{
-					// send pings every ClusterHeartbeatInterval seconds if there is no activity
-					Time: time.Duration(n.serverConfig.ClusterHeartbeatInterval) * time.Second,
-					// wait 1 second for ping ack before considering the connection dead
-					Timeout: time.Second,
-					// send pings even without active streams
-					PermitWithoutStream: true,
-				}
-				conn, err := grpc.Dial(node.Addr, grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
-				if err != nil {
-					n.log.Errorf("failed to dial server: %s, retry again: %d, . %v", node.Addr, retries, err)
-					retries++
-					continue
-				}
+func (n *Node) waitAllTheOtherCandidateConnected() {
 
-				client := pb.NewInternalServiceClient(conn)
+	var wg conc.WaitGroup
+	for _, node := range n.Config.OtherCandidateNodes {
+		wg.Go(func() {
+			n.connectToNode(node)
+		})
+	}
+	wg.Wait()
+}
 
-				// exchange information between the two nodes in preparation for the creation of a cluster
-				currentNode := config.CurrentNode
-				request := pb.NodeInfoRequest{
-					NodeId:       uint32(currentNode.Id),
-					NodeIp:       currentNode.Ip,
-					InternalPort: uint32(currentNode.InternalPort),
-				}
-				nodeInfo, err := client.GetNodeInfo(context.Background(), &request)
+func (n *Node) connectToNode(nodeInfo config.NodeInfo) {
+	retries := 1
+	var kacp = keepalive.ClientParameters{
+		// send pings every ClusterHeartbeatInterval seconds if there is no activity
+		Time: time.Duration(n.Config.ClusterHeartbeatInterval) * time.Second,
+		// wait 1 second for ping ack before considering the connection dead
+		Timeout: time.Second,
+		// send pings even without active streams
+		PermitWithoutStream: true,
+	}
 
-				// update cluster node config
-				config.UpdateNode(int(nodeInfo.NodeId), nodeInfo.NodeIp, int(nodeInfo.InternalPort))
+	for {
+		conn, err := grpc.Dial(nodeInfo.Addr, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithKeepaliveParams(kacp))
+		if err != nil {
+			n.log.Errorf("failed to dial server: %s, retry time: %d, . %v", nodeInfo.Addr, retries, err)
+			retries++
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
 
-				// Record remote connections
-				n.network.AddConn(raft.ServerID(strconv.Itoa(int(nodeInfo.NodeId))), conn, client)
+		client := pb.NewInternalServiceClient(conn)
+		// Record remote connections
+		n.network.AddConn(raft.ServerID(nodeInfo.Id), conn, client)
+		break
+	}
+}
 
-				connWg.Done()
-				break
-			}
-		}()
+func (n *Node) obtainOtherNodeInfo() {
+	var wg conc.WaitGroup
+	for _, node := range n.Config.OtherCandidateNodes {
+		wg.Go(func() {
+			n.getNodeInfo(node)
+		})
+	}
+	// handle the problem of cluster configuration mismatch
+	// if the cluster configuration does not match, it will exit directly
+	defer func() {
+		if r := recover(); r != nil {
+			n.shutDownCh <- struct{}{}
+		}
+	}()
 
+	wg.WaitAndRecover()
+}
+
+// exchange information between the two nodes in preparation for the creation of a cluster
+func (n *Node) getNodeInfo(nodeInfo config.NodeInfo) {
+	retries := 0
+	for {
+		currentNode := n.Config.SelfNode
+		request := pb.NodeInfoRequest{
+			NodeId:       currentNode.Id,
+			NodeIp:       currentNode.Ip,
+			InternalPort: uint64(currentNode.InternalPort),
+			IsCandidate:  currentNode.IsCandidate,
+		}
+		client := n.network.GetInternalClient(raft.ServerID(nodeInfo.Id))
+		response, err := client.GetNodeInfo(context.Background(), &request)
+		if err != nil {
+			n.log.Errorf("failed to get node info from %s - %s, retry time: %d, . %v", nodeInfo.Id, nodeInfo.Addr, retries, err)
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+
+		remoteNode := config.NodeInfo{
+			Id:          response.NodeId,
+			Ip:          response.NodeIp,
+			Addr:        response.NodeIp + ":" + strconv.Itoa(int(response.InternalPort)),
+			IsCandidate: response.IsCandidate,
+		}
+
+		// update cluster node config
+		n.Config.UpdateRemoteNode(remoteNode, true)
 	}
 }

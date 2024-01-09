@@ -2,12 +2,12 @@ package raft
 
 import (
 	"context"
+	core "github.com/linkypi/hiraeth.registry/core/network"
 	"io"
 	"sync"
 	"time"
 
 	"github.com/hashicorp/raft"
-	core "github.com/linkypi/hiraeth.registry/core"
 	pb "github.com/linkypi/hiraeth.registry/proto"
 )
 

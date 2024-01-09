@@ -1,6 +1,8 @@
-package core
+package network
 
-import "time"
+import (
+	"time"
+)
 
 type Option func(m *NetworkManager)
 

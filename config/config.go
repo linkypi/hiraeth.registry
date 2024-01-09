@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"fmt"
 	"github.com/sirupsen/logrus"
 	"os"
 	"reflect"
@@ -10,51 +11,91 @@ import (
 	"strings"
 )
 
-type ServerConfig struct {
-	CurrentNode              node
-	CandidateNodeMap         map[int]node
-	OtherCandidateNodes      []node
+type NodeConfig struct {
+	SelfNode NodeInfo
+	// cluster server node info, include candidate node and observer node
+	ClusterServers           map[string]NodeInfo
+	OtherCandidateNodes      []NodeInfo
+	ClusterHeartbeatInterval int
 	DataDir                  string
 	LogDir                   string
-	ClusterHeartbeatInterval int
 }
 
-func (sc *ServerConfig) UpdateNode(nodeId int, nodeIp string, nodeInternalPort int) {
-	addr := nodeIp + ":" + strconv.Itoa(nodeInternalPort)
-	for _, candidateNode := range sc.OtherCandidateNodes {
-		if candidateNode.Addr == addr {
-			candidateNode.Id = nodeId
-			sc.CandidateNodeMap[nodeId] = candidateNode
-			log.Debugf("update node success: %d, %s", nodeId, addr)
-			return
+func (nc *NodeConfig) UpdateRemoteNode(remoteNode NodeInfo, throwEx bool) {
+
+	if remoteNode.Id == nc.SelfNode.Id {
+		msg := fmt.Sprintf("the remote node id [%s][%s] conflicts with the current node id [%s][%s]",
+			remoteNode.Id, remoteNode.Addr, nc.SelfNode.Id, nc.SelfNode.Addr)
+		log.Error(msg)
+		if throwEx {
+			panic(msg)
+		}
+		return
+	}
+
+	node, ok := nc.ClusterServers[remoteNode.Id]
+	if !ok {
+		// it is possible that a node is missing from the cluster address
+		// configuration in the node, or it may be a new node
+		msg := fmt.Sprintf("remote node [%s][%s] not found int cluster servers, add it to cluster.", remoteNode.Id, remoteNode.Addr)
+		log.Info(msg)
+		node = remoteNode
+		nc.ClusterServers[remoteNode.Id] = remoteNode
+	}
+	if node.Addr != remoteNode.Addr {
+		msg := fmt.Sprintf("update remote node info failed, node id exist, but addr not match: %s, %s, %s",
+			remoteNode.Id, node.Addr, remoteNode.Addr)
+		log.Error(msg)
+		if throwEx {
+			panic(msg)
+		}
+		return
+	}
+	node.IsCandidate = remoteNode.IsCandidate
+	if node.IsCandidate {
+		nc.OtherCandidateNodes = append(nc.OtherCandidateNodes, node)
+	}
+	log.Debugf("update remote node info success: %s, %s", remoteNode.Id, remoteNode.Addr)
+}
+
+// get other candidate servers, exclude self node
+func (nc *NodeConfig) getOtherCandidateServers() []NodeInfo {
+	var filtered []NodeInfo
+	for _, node := range nc.ClusterServers {
+		if node.IsCandidate {
+			filtered = append(filtered, node)
 		}
 	}
+	return filtered
 }
 
+var properties = make([]property, 0, 16)
+var log *logrus.Logger
+
 type internalConfig struct {
-	NodeId           int
+	NodeId           string
 	NodeIp           string
 	NodeInternalPort int
 	ClientHttpPort   int
 	ClientTcpPort    int
 
-	IsControllerCandidate    bool
-	CandidateServers         []string
+	IsCandidate              bool
+	ClusterServers           []string
 	ClusterHeartbeatInterval int
 
 	DataDir string
 	LogDir  string
 }
 
-// server node info
-type node struct {
-	Id               int
+// server node Info
+type NodeInfo struct {
+	Id               string
 	Ip               string
 	InternalPort     int
 	Addr             string
 	externalHttpPort int
 	externalTcpPort  int
-	isCandidate      bool
+	IsCandidate      bool
 }
 
 type property struct {
@@ -66,25 +107,24 @@ type property struct {
 	parseHandler func(val string) any
 }
 
-const NODE_ID = "node.id"
-const NODE_IP = "node.ip"
-const NODE_INTERNAL_PORT = "node.internal.port"
-const IS_CONTROLLER_CANDIDATE = "is.controller.candidate"
-const CONTROLLER_CANDIDATE_SERVERS = "controller.candidate.servers"
-const CLIENT_HTTP_PORT = "client.http.port"
-const CLIENT_TCP_PORT = "client.tcp.port"
-const DATA_DIR = "data.dir"
-const LOG_DIR = "log.dir"
-const CLUSTER_HEARTBEAT_INTERVAL = "cluster.heartbeat.interval"
-
-var properties = make([]property, 0, 16)
-var log *logrus.Logger
+const (
+	NodeId                   = "node.id"
+	NodeIp                   = "node.ip"
+	NodeInternalPort         = "node.internal.port"
+	IsCandidate              = "node.is.candidate"
+	ClusterServerAddr        = "cluster.server.addr"
+	ClusterHeartbeatInterval = "cluster.heartbeat.interval"
+	ClientHttpPort           = "client.http.port"
+	ClientTcpPort            = "client.tcp.port"
+	DataDir                  = "data.dir"
+	LogDir                   = "log.dir"
+)
 
 func init() {
 	properties = append(properties, property{
 		dataType:     "int",
 		propName:     "NodeId",
-		key:          NODE_ID,
+		key:          NodeId,
 		require:      true,
 		defaultVal:   nil,
 		parseHandler: validateNumber,
@@ -92,7 +132,7 @@ func init() {
 	properties = append(properties, property{
 		dataType:     "string",
 		propName:     "NodeIp",
-		key:          NODE_IP,
+		key:          NodeIp,
 		require:      true,
 		defaultVal:   nil,
 		parseHandler: validateIP,
@@ -100,33 +140,33 @@ func init() {
 	properties = append(properties, property{
 		dataType:   "int",
 		propName:   "NodeInternalPort",
-		key:        NODE_INTERNAL_PORT,
+		key:        NodeInternalPort,
 		require:    false,
 		defaultVal: 2661})
 	properties = append(properties, property{
 		dataType:   "bool",
-		propName:   "IsControllerCandidate",
-		key:        IS_CONTROLLER_CANDIDATE,
+		propName:   "IsCandidate",
+		key:        IsCandidate,
 		require:    false,
 		defaultVal: true})
 	properties = append(properties, property{
 		dataType:     "string",
-		propName:     "CandidateServers",
-		key:          CONTROLLER_CANDIDATE_SERVERS,
-		parseHandler: parseCtrlCandidateServers,
+		propName:     "ClusterServers",
+		key:          ClusterServerAddr,
+		parseHandler: parseClusterServers,
 		require:      true,
 		defaultVal:   nil})
 	properties = append(properties, property{
 		dataType:     "int",
 		propName:     "ClusterHeartbeatInterval",
-		key:          CLUSTER_HEARTBEAT_INTERVAL,
+		key:          ClusterHeartbeatInterval,
 		parseHandler: validateNumber,
 		require:      false,
 		defaultVal:   5})
-	properties = append(properties, property{dataType: "int", propName: "ClientHttpPort", key: CLIENT_HTTP_PORT, require: false, defaultVal: 5042})
-	properties = append(properties, property{dataType: "int", propName: "ClientTcpPort", key: CLIENT_TCP_PORT, require: false, defaultVal: 5386})
-	properties = append(properties, property{dataType: "string", propName: "DataDir", key: DATA_DIR, require: false, defaultVal: "./data"})
-	properties = append(properties, property{dataType: "string", propName: "LogDir", key: LOG_DIR, require: false, defaultVal: "./log"})
+	properties = append(properties, property{dataType: "int", propName: "ClientHttpPort", key: ClientHttpPort, require: false, defaultVal: 5042})
+	properties = append(properties, property{dataType: "int", propName: "ClientTcpPort", key: ClientTcpPort, require: false, defaultVal: 5386})
+	properties = append(properties, property{dataType: "string", propName: "DataDir", key: DataDir, require: false, defaultVal: "./data"})
+	properties = append(properties, property{dataType: "string", propName: "LogDir", key: LogDir, require: false, defaultVal: "./log"})
 }
 
 func validateNumber(id string) any {
@@ -134,7 +174,7 @@ func validateNumber(id string) any {
 	match := clusterRegexCompile.MatchString(id)
 	if !match {
 
-		log.Error("property " + NODE_ID + " value is invalid: " + id)
+		log.Error("property " + NodeId + " value is invalid: " + id)
 		os.Exit(1)
 	}
 	return id
@@ -171,7 +211,7 @@ func loadConfig(filePath string) (map[string]string, error) {
 	return props, nil
 }
 
-func ParseConfig(filePath string, logger *logrus.Logger) ServerConfig {
+func ParseConfig(filePath string, logger *logrus.Logger) NodeConfig {
 	log = logger
 	configMap, err := loadConfig(filePath)
 	if err != nil {
@@ -189,48 +229,45 @@ func ParseConfig(filePath string, logger *logrus.Logger) ServerConfig {
 		setConfigProperty(&interConfig, prop, val)
 	}
 
-	config := ServerConfig{}
-	currentNode := node{
+	config := NodeConfig{}
+	currentNode := NodeInfo{
 		Id:               interConfig.NodeId,
 		Ip:               interConfig.NodeIp,
 		Addr:             interConfig.NodeIp + ":" + strconv.Itoa(interConfig.NodeInternalPort),
-		isCandidate:      interConfig.IsControllerCandidate,
+		IsCandidate:      interConfig.IsCandidate,
 		externalHttpPort: interConfig.ClientHttpPort,
 		externalTcpPort:  interConfig.ClientTcpPort,
 		InternalPort:     interConfig.NodeInternalPort,
 	}
-	config.CurrentNode = currentNode
-	config.CandidateNodeMap = make(map[int]node)
-	config.CandidateNodeMap[currentNode.Id] = currentNode
+	config.SelfNode = currentNode
+	config.ClusterServers = make(map[string]NodeInfo)
+	config.ClusterServers[currentNode.Id] = currentNode
+
 	config.LogDir = interConfig.LogDir
 	config.DataDir = interConfig.DataDir
 	config.ClusterHeartbeatInterval = interConfig.ClusterHeartbeatInterval
 
-	config.OtherCandidateNodes = make([]node, 0, 2)
-	for _, server := range interConfig.CandidateServers {
+	for _, server := range interConfig.ClusterServers {
 		if server == currentNode.Addr {
 			continue
 		}
 		parts := strings.Split(server, ":")
-		port, err := strconv.Atoi(parts[1])
+		id := parts[0]
+		ip := parts[1]
+		port, err := strconv.Atoi(parts[2])
 		if err != nil {
 			log.Error("parse candidate server port failed: "+server, err)
 			os.Exit(1)
 		}
-		node := node{
-			Ip:           parts[0],
-			Addr:         parts[0] + ":" + strconv.Itoa(port),
+		// The property isCandidate of node can only be known through rpc communication, so isCandidate is not assigned here
+		node := NodeInfo{
+			Id:           id,
+			Ip:           ip,
+			Addr:         ip + ":" + strconv.Itoa(port),
 			InternalPort: port,
-			isCandidate:  true,
 		}
-		config.OtherCandidateNodes = append(config.OtherCandidateNodes, node)
+		config.ClusterServers[id] = node
 	}
-
-	//sort.Slice(config.OtherCandidateNodes, func(i, j int) bool {
-	//	addrA := config.OtherCandidateNodes[i].addr
-	//	addrB := config.OtherCandidateNodes[j].addr
-	//	return murmur3.Sum64([]byte(addrA)) < murmur3.Sum64([]byte(addrB))
-	//})
 
 	return config
 }
@@ -302,28 +339,28 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 	}
 }
 
-func parseCtrlCandidateServers(ctrlCandidateServers string) any {
+func parseClusterServers(ctrlCandidateServers string) any {
 	parts := strings.Split(ctrlCandidateServers, ",")
-	controllerCandidateServers := make([]string, len(parts))
+	clusterServers := make([]string, len(parts))
 
-	clusterRegexCompile := regexp.MustCompile("(\\d+\\.\\d+\\.\\d+\\.\\d+):(\\d+)")
+	clusterRegexCompile := regexp.MustCompile("(\\d+):(\\d+\\.\\d+\\.\\d+\\.\\d+):(\\d+)")
 
 	for index, part := range parts {
 		match := clusterRegexCompile.MatchString(part)
 		if !match {
-			log.Error("property " + CONTROLLER_CANDIDATE_SERVERS + " value is invalid: " + part)
+			log.Error("property " + ClusterServerAddr + " value is invalid: " + part)
 			os.Exit(1)
 		}
-		controllerCandidateServers[index] = part
+		clusterServers[index] = part
 	}
-	return controllerCandidateServers
+	return clusterServers
 }
 
 func validateIP(ip string) any {
 	clusterRegexCompile := regexp.MustCompile("\\d+\\.\\d+\\.\\d+\\.\\d+")
 	match := clusterRegexCompile.MatchString(ip)
 	if !match {
-		log.Error("property " + NODE_IP + " value is invalid: " + ip)
+		log.Error("property " + NodeIp + " value is invalid: " + ip)
 		os.Exit(1)
 	}
 	return ip
