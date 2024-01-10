@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"github.com/hashicorp/raft"
 	boltdb "github.com/hashicorp/raft-boltdb"
+	"github.com/linkypi/hiraeth.registry/config"
 	core "github.com/linkypi/hiraeth.registry/core/network"
 	pb "github.com/linkypi/hiraeth.registry/proto"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"os"
+	"time"
 )
 
 type RaftNode struct {
@@ -25,20 +27,23 @@ func (rn *RaftNode) transport() raft.Transport {
 	return raftAPI{rn.manager}
 }
 
-func RegisterRaftTransportService(grpcServer *grpc.Server, manager *core.NetworkManager) {
-	pb.RegisterRaftTransportServer(grpcServer, gRPCAPI{manager: manager})
+func RegisterRaftTransportService(grpcServer *grpc.Server, net *core.NetworkManager) {
+	pb.RegisterRaftTransportServer(grpcServer, grpcAPI{manager: net})
 }
 
-func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server,
+func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server, clusterConfig config.ClusterConfig,
 	notifyCh chan bool, fsm raft.FSM) (*raft.Raft, error) {
 
 	conf := raft.DefaultConfig()
+	conf.HeartbeatTimeout = time.Duration(clusterConfig.RaftHeartbeatTimeout) * time.Millisecond
+	conf.ElectionTimeout = time.Duration(clusterConfig.RaftElectionTimeout) * time.Millisecond
 	conf.NotifyCh = notifyCh
 	conf.LocalID = raft.ServerID(nodeId)
 
 	baseDir := dataDir + "/" + "raft"
 	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
-		os.MkdirAll(baseDir, 0755)
+		err = os.MkdirAll(baseDir, 0755)
+		return nil, fmt.Errorf(`create raft data dir [%s] failed: %v`, baseDir, err)
 	}
 
 	logPath := baseDir + "/logs.dat"

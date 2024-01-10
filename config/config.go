@@ -2,85 +2,15 @@ package config
 
 import (
 	"bufio"
-	"fmt"
 	"github.com/sirupsen/logrus"
 	"os"
 	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 )
 
-func (nc *NodeConfig) UpdateRemoteNode(remoteNode NodeInfo, throwEx bool) {
-
-	if remoteNode.Id == nc.SelfNode.Id {
-		msg := fmt.Sprintf("the remote node id [%s][%s] conflicts with the current node id [%s][%s]",
-			remoteNode.Id, remoteNode.Addr, nc.SelfNode.Id, nc.SelfNode.Addr)
-		log.Error(msg)
-		if throwEx {
-			panic(msg)
-		}
-		return
-	}
-
-	node, ok := nc.ClusterServers[remoteNode.Id]
-	if !ok {
-		// it is possible that a node is missing from the cluster address
-		// configuration in the node, or it may be a new node
-		msg := fmt.Sprintf("remote node [%s][%s] not found int cluster servers, add it to cluster.", remoteNode.Id, remoteNode.Addr)
-		log.Info(msg)
-		node = remoteNode
-		nc.ClusterServers[remoteNode.Id] = remoteNode
-	}
-	if node.Addr != remoteNode.Addr {
-		msg := fmt.Sprintf("update remote node info failed, node id exist, but addr not match: %s, %s, %s",
-			remoteNode.Id, node.Addr, remoteNode.Addr)
-		log.Error(msg)
-		if throwEx {
-			panic(msg)
-		}
-		return
-	}
-	node.IsCandidate = remoteNode.IsCandidate
-	if node.IsCandidate {
-		nc.OtherCandidateNodes = append(nc.OtherCandidateNodes, node)
-	}
-	log.Debugf("update remote node info success: %s, %s", remoteNode.Id, remoteNode.Addr)
-}
-
-// get other candidate servers, exclude self node
-func (nc *NodeConfig) GetOtherCandidateServers() []NodeInfo {
-	var filtered []NodeInfo
-	for _, node := range nc.ClusterServers {
-		if node.IsCandidate {
-			filtered = append(filtered, node)
-		}
-	}
-	return filtered
-}
-
-func (nc *NodeConfig) GetOtherNodes() []NodeInfo {
-	var filtered = make([]NodeInfo, 0, 8)
-	for _, node := range nc.ClusterServers {
-		if node.Id != nc.SelfNode.Id {
-			filtered = append(filtered, node)
-		}
-	}
-	return filtered
-}
-
 var properties = make([]property, 0, 16)
 var log *logrus.Logger
-
-func validateNumber(id string) any {
-	clusterRegexCompile := regexp.MustCompile("\\d+")
-	match := clusterRegexCompile.MatchString(id)
-	if !match {
-		log.Error("property " + NodeId + " value is invalid: " + id)
-		os.Exit(1)
-	}
-	return id
-}
 
 // loadConfig reads a .conf file and parses its contents into a map
 func loadConfig(filePath string) (map[string]string, error) {
@@ -113,7 +43,7 @@ func loadConfig(filePath string) (map[string]string, error) {
 	return props, nil
 }
 
-func ParseConfig(filePath string, logger *logrus.Logger) NodeConfig {
+func ParseConfig(filePath string, logger *logrus.Logger) Config {
 	log = logger
 	configMap, err := loadConfig(filePath)
 	if err != nil {
@@ -131,8 +61,24 @@ func ParseConfig(filePath string, logger *logrus.Logger) NodeConfig {
 		setConfigProperty(&interConfig, prop, val)
 	}
 
-	config := NodeConfig{}
-	selfNode := NodeInfo{
+	if interConfig.StartupMode == Cluster && (len(interConfig.ClusterServers) < 2) {
+		log.Error("the cluster address is not configured, it must be configured when starting with cluster mode")
+		os.Exit(1)
+	}
+
+	nodeConfig, selfNode := buildNode(interConfig)
+	clusterConfig := buildClusterConfig(selfNode, interConfig)
+
+	config := Config{
+		NodeConfig:    nodeConfig,
+		ClusterConfig: clusterConfig,
+	}
+	return config
+}
+
+func buildNode(interConfig internalConfig) (NodeConfig, *NodeInfo) {
+	nodeConfig := NodeConfig{}
+	selfNode := &NodeInfo{
 		Id:               interConfig.NodeId,
 		Ip:               interConfig.NodeIp,
 		Addr:             interConfig.NodeIp + ":" + strconv.Itoa(interConfig.NodeInternalPort),
@@ -141,15 +87,24 @@ func ParseConfig(filePath string, logger *logrus.Logger) NodeConfig {
 		externalTcpPort:  interConfig.ClientTcpPort,
 		InternalPort:     interConfig.NodeInternalPort,
 	}
-	config.SelfNode = selfNode
-	config.ClusterServers = make(map[string]NodeInfo)
-	config.ClusterServers[selfNode.Id] = selfNode
+	nodeConfig.SelfNode = selfNode
+	nodeConfig.LogDir = interConfig.LogDir
+	nodeConfig.DataDir = interConfig.DataDir
+	return nodeConfig, selfNode
+}
 
-	config.LogDir = interConfig.LogDir
-	config.DataDir = interConfig.DataDir
-	config.ClusterHeartbeatInterval = interConfig.ClusterHeartbeatInterval
-	config.ClusterQuorumCount = interConfig.ClusterQuorumCount
+func buildClusterConfig(selfNode *NodeInfo, interConfig internalConfig) ClusterConfig {
+	clusterConfig := ClusterConfig{
+		SelfNode:                 selfNode,
+		ClusterHeartbeatInterval: interConfig.ClusterHeartbeatInterval,
+		ClusterQuorumCount:       interConfig.ClusterQuorumCount,
+		AutoJoinClusterEnable:    interConfig.AutoJoinClusterEnable,
+		RaftHeartbeatTimeout:     interConfig.RaftHeartbeatTimeout,
+		RaftElectionTimeout:      interConfig.RaftElectionTimeout,
+	}
 
+	clusterConfig.ClusterServers = make(map[string]*NodeInfo)
+	clusterConfig.ClusterServers[selfNode.Id] = selfNode
 	for _, server := range interConfig.ClusterServers {
 		if server == selfNode.Addr {
 			continue
@@ -169,10 +124,9 @@ func ParseConfig(filePath string, logger *logrus.Logger) NodeConfig {
 			Addr:         ip + ":" + strconv.Itoa(port),
 			InternalPort: port,
 		}
-		config.ClusterServers[id] = node
+		clusterConfig.ClusterServers[id] = &node
 	}
-
-	return config
+	return clusterConfig
 }
 
 func setConfigProperty(config *internalConfig, prop property, val string) {
@@ -186,7 +140,7 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 	}()
 	if field.IsValid() && field.CanSet() {
 		if field.Kind() == reflect.Array && prop.parseHandler != nil {
-			newValues := prop.parseHandler(val)
+			newValues := prop.parseHandler(val, prop.options)
 			field.Set(reflect.ValueOf(newValues))
 			return
 		}
@@ -199,7 +153,7 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 				return
 			}
 			if prop.parseHandler != nil {
-				v := prop.parseHandler(val)
+				v := prop.parseHandler(val, prop.options)
 				field.Set(reflect.ValueOf(v))
 				return
 			}
@@ -214,7 +168,7 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 				return
 			}
 			if prop.parseHandler != nil {
-				prop.parseHandler(val)
+				prop.parseHandler(val, prop.options)
 			}
 			intVal, err := strconv.ParseInt(strVal, 10, 64)
 			if err != nil {
@@ -232,7 +186,7 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 				return
 			}
 			if prop.parseHandler != nil {
-				v := prop.parseHandler(val)
+				v := prop.parseHandler(val, prop.options)
 				field.Set(reflect.ValueOf(v))
 				return
 			}
@@ -247,31 +201,4 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 			field.Set(ret.Convert(field.Type()))
 		}
 	}
-}
-
-func parseClusterServers(ctrlCandidateServers string) any {
-	parts := strings.Split(ctrlCandidateServers, ",")
-	clusterServers := make([]string, len(parts))
-
-	clusterRegexCompile := regexp.MustCompile("(\\d+):(\\d+\\.\\d+\\.\\d+\\.\\d+):(\\d+)")
-
-	for index, part := range parts {
-		match := clusterRegexCompile.MatchString(part)
-		if !match {
-			log.Error("property " + ClusterServerAddr + " value is invalid: " + part)
-			os.Exit(1)
-		}
-		clusterServers[index] = part
-	}
-	return clusterServers
-}
-
-func validateIP(ip string) any {
-	clusterRegexCompile := regexp.MustCompile("\\d+\\.\\d+\\.\\d+\\.\\d+")
-	match := clusterRegexCompile.MatchString(ip)
-	if !match {
-		log.Error("property " + NodeIp + " value is invalid: " + ip)
-		os.Exit(1)
-	}
-	return ip
 }

@@ -1,9 +1,16 @@
 syntax = "proto3";
-
-option go_package = "github.com/linkypi/hiraeth.registry/proto";
+import "google/protobuf/empty.proto";
+option go_package = "../proto";
 
 service ClusterService {
   rpc GetNodeInfo(NodeInfoRequest) returns (NodeInfoResponse) {}
+  rpc ForwardJoinClusterRequest(JoinClusterRequest)returns(google.protobuf.Empty){}
+}
+
+message JoinClusterRequest {
+  string nodeId = 1;
+  string nodeAddr = 2;
+  bool autoJoinClusterEnable=3;
 }
 
 // Bring the current node information
@@ -12,6 +19,7 @@ message NodeInfoRequest {
   string nodeIp = 2;
   uint64 internalPort = 3;
   bool isCandidate = 4;
+  bool autoJoinClusterEnable=5;
 }
 
 // Reply to the current node information
@@ -20,4 +28,5 @@ message NodeInfoResponse {
   string nodeIp = 2;
   uint64 internalPort = 3;
   bool isCandidate = 4;
+  bool autoJoinClusterEnable=5;
 }

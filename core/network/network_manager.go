@@ -38,43 +38,49 @@ type conn struct {
 	mtx            sync.Mutex
 }
 
-func (manager *NetworkManager) GetConnectedNodes(clusterServers map[string]config.NodeInfo) []config.NodeInfo {
+func (manager *NetworkManager) GetConnectedNodes(clusterServers map[string]*config.NodeInfo) []config.NodeInfo {
 	arr := make([]config.NodeInfo, 0, 8)
 	for _, node := range clusterServers {
 		_, ok := manager.Connections[raft.ServerID(node.Id)]
 		if ok {
-			arr = append(arr, node)
+			arr = append(arr, *node)
 		}
 	}
 	return arr
 }
 
-func (manager *NetworkManager) GetRaftClient(id raft.ServerID) (pb.RaftTransportClient, error) {
-	con, ok := manager.Connections[id]
+func (manager *NetworkManager) GetRaftClient(id string) (pb.RaftTransportClient, error) {
+	serverID := raft.ServerID(id)
+	con, ok := manager.Connections[serverID]
 	if ok {
 		return con.raftClient, nil
 	}
 	return nil, errors.New(string("connection not exist, id: " + id))
 }
 
-func (manager *NetworkManager) GetInternalClient(id raft.ServerID) pb.ClusterServiceClient {
-	return manager.Connections[id].internalClient
+func (manager *NetworkManager) GetInternalClient(id string) pb.ClusterServiceClient {
+	serverID := raft.ServerID(id)
+	return manager.Connections[serverID].internalClient
 }
 
-func (manager *NetworkManager) IsConnected(id raft.ServerID) bool {
-	grpcConn := manager.Connections[id].grpcConn
+func (manager *NetworkManager) IsConnected(id string) bool {
+	serverID := raft.ServerID(id)
+	grpcConn := manager.Connections[serverID].grpcConn
 	state := grpcConn.GetState()
 	return state == connectivity.Ready || state == connectivity.Idle
 }
 
-func (manager *NetworkManager) AddConn(id raft.ServerID, grpcConn *grpc.ClientConn,
+func (manager *NetworkManager) AddConn(id string, grpcConn *grpc.ClientConn,
 	internalServClient pb.ClusterServiceClient, raftClient pb.RaftTransportClient) {
+
+	serverID := raft.ServerID(id)
+
 	manager.ConnectionsMtx.Lock()
-	c, ok := manager.Connections[id]
+	c, ok := manager.Connections[serverID]
 	if !ok {
 		c = &conn{}
 		c.mtx.Lock()
-		manager.Connections[id] = c
+		manager.Connections[serverID] = c
 	}
 	manager.ConnectionsMtx.Unlock()
 	if ok {
@@ -92,10 +98,10 @@ func (manager *NetworkManager) AddConn(id raft.ServerID, grpcConn *grpc.ClientCo
 	}
 }
 
-// New creates both components of raft-grpc-transport: a gRPC service and a Raft Transport.
-func NewNetworkManager(localAddress raft.ServerAddress, options ...Option) *NetworkManager {
+func NewNetworkManager(localAddress string, options ...Option) *NetworkManager {
+	address := raft.ServerAddress(localAddress)
 	m := &NetworkManager{
-		LocalAddress: localAddress,
+		LocalAddress: address,
 		RpcChan:      make(chan raft.RPC),
 		Connections:  map[raft.ServerID]*conn{},
 	}

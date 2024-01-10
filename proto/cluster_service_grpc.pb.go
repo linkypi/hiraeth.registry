@@ -11,6 +11,7 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -19,7 +20,8 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	ClusterService_GetNodeInfo_FullMethodName = "/ClusterService/GetNodeInfo"
+	ClusterService_GetNodeInfo_FullMethodName               = "/ClusterService/GetNodeInfo"
+	ClusterService_ForwardJoinClusterRequest_FullMethodName = "/ClusterService/ForwardJoinClusterRequest"
 )
 
 // ClusterServiceClient is the client API for ClusterService service.
@@ -27,6 +29,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ClusterServiceClient interface {
 	GetNodeInfo(ctx context.Context, in *NodeInfoRequest, opts ...grpc.CallOption) (*NodeInfoResponse, error)
+	ForwardJoinClusterRequest(ctx context.Context, in *JoinClusterRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type clusterServiceClient struct {
@@ -46,11 +49,21 @@ func (c *clusterServiceClient) GetNodeInfo(ctx context.Context, in *NodeInfoRequ
 	return out, nil
 }
 
+func (c *clusterServiceClient) ForwardJoinClusterRequest(ctx context.Context, in *JoinClusterRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, ClusterService_ForwardJoinClusterRequest_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ClusterServiceServer is the server API for ClusterService service.
 // All implementations should embed UnimplementedClusterServiceServer
 // for forward compatibility
 type ClusterServiceServer interface {
 	GetNodeInfo(context.Context, *NodeInfoRequest) (*NodeInfoResponse, error)
+	ForwardJoinClusterRequest(context.Context, *JoinClusterRequest) (*emptypb.Empty, error)
 }
 
 // UnimplementedClusterServiceServer should be embedded to have forward compatible implementations.
@@ -59,6 +72,9 @@ type UnimplementedClusterServiceServer struct {
 
 func (UnimplementedClusterServiceServer) GetNodeInfo(context.Context, *NodeInfoRequest) (*NodeInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetNodeInfo not implemented")
+}
+func (UnimplementedClusterServiceServer) ForwardJoinClusterRequest(context.Context, *JoinClusterRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ForwardJoinClusterRequest not implemented")
 }
 
 // UnsafeClusterServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -90,6 +106,24 @@ func _ClusterService_GetNodeInfo_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ClusterService_ForwardJoinClusterRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JoinClusterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterServiceServer).ForwardJoinClusterRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterService_ForwardJoinClusterRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterServiceServer).ForwardJoinClusterRequest(ctx, req.(*JoinClusterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ClusterService_ServiceDesc is the grpc.ServiceDesc for ClusterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -100,6 +134,10 @@ var ClusterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetNodeInfo",
 			Handler:    _ClusterService_GetNodeInfo_Handler,
+		},
+		{
+			MethodName: "ForwardJoinClusterRequest",
+			Handler:    _ClusterService_ForwardJoinClusterRequest_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

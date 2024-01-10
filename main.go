@@ -15,12 +15,12 @@ func main() {
 	flag.Parse()
 	log.Infof("config file path: %s", *configPath)
 
-	serverConfig := config.ParseConfig(*configPath, log)
-	initLogger(serverConfig.LogDir)
+	conf := config.ParseConfig(*configPath, log)
+	initLogger(conf.NodeConfig.LogDir)
 
 	if *standAlone == "true" {
-		serverConfig.StandAlone = true
+		conf.NodeConfig.StandAlone = true
 	}
-	node := core.NewNode(serverConfig, log)
+	node := core.NewNode(conf, log)
 	node.Start()
 }

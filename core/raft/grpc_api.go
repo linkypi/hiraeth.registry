@@ -11,14 +11,14 @@ import (
 
 // These are requests incoming over gRPC that we need to relay to the Raft engine.
 
-type gRPCAPI struct {
+type grpcAPI struct {
 	manager *core.NetworkManager
 
 	// "Unsafe" to ensure compilation fails if new methods are added but not implemented
 	pb.UnsafeRaftTransportServer
 }
 
-func (g gRPCAPI) handleRPC(command interface{}, data io.Reader) (interface{}, error) {
+func (g grpcAPI) handleRPC(command interface{}, data io.Reader) (interface{}, error) {
 	ch := make(chan raft.RPCResponse, 1)
 	rpc := raft.RPC{
 		Command:  command,
@@ -44,7 +44,7 @@ wait:
 	return resp.Response, nil
 }
 
-func (g gRPCAPI) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
+func (g grpcAPI) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest) (*pb.AppendEntriesResponse, error) {
 	resp, err := g.handleRPC(decodeAppendEntriesRequest(req), nil)
 	if err != nil {
 		return nil, err
@@ -52,7 +52,7 @@ func (g gRPCAPI) AppendEntries(ctx context.Context, req *pb.AppendEntriesRequest
 	return encodeAppendEntriesResponse(resp.(*raft.AppendEntriesResponse)), nil
 }
 
-func (g gRPCAPI) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
+func (g grpcAPI) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*pb.RequestVoteResponse, error) {
 	resp, err := g.handleRPC(decodeRequestVoteRequest(req), nil)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func (g gRPCAPI) RequestVote(ctx context.Context, req *pb.RequestVoteRequest) (*
 	return encodeRequestVoteResponse(resp.(*raft.RequestVoteResponse)), nil
 }
 
-func (g gRPCAPI) TimeoutNow(ctx context.Context, req *pb.TimeoutNowRequest) (*pb.TimeoutNowResponse, error) {
+func (g grpcAPI) TimeoutNow(ctx context.Context, req *pb.TimeoutNowRequest) (*pb.TimeoutNowResponse, error) {
 	resp, err := g.handleRPC(decodeTimeoutNowRequest(req), nil)
 	if err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func (g gRPCAPI) TimeoutNow(ctx context.Context, req *pb.TimeoutNowRequest) (*pb
 	return encodeTimeoutNowResponse(resp.(*raft.TimeoutNowResponse)), nil
 }
 
-func (g gRPCAPI) InstallSnapshot(s pb.RaftTransport_InstallSnapshotServer) error {
+func (g grpcAPI) InstallSnapshot(s pb.RaftTransport_InstallSnapshotServer) error {
 	isr, err := s.Recv()
 	if err != nil {
 		return err
@@ -103,7 +103,7 @@ func (s *snapshotStream) Read(b []byte) (int, error) {
 	return n, nil
 }
 
-func (g gRPCAPI) AppendEntriesPipeline(s pb.RaftTransport_AppendEntriesPipelineServer) error {
+func (g grpcAPI) AppendEntriesPipeline(s pb.RaftTransport_AppendEntriesPipelineServer) error {
 	for {
 		msg, err := s.Recv()
 		if err != nil {
