@@ -58,7 +58,7 @@ func ParseConfig(filePath string, logger *logrus.Logger) Config {
 			log.Error("property " + prop.key + " cannot be empty.")
 			os.Exit(1)
 		}
-		setConfigProperty(&interConfig, prop, val)
+		setInternalConfigProperty(&interConfig, prop, val)
 	}
 
 	if interConfig.StartupMode == Cluster && (len(interConfig.ClusterServers) < 2) {
@@ -72,6 +72,7 @@ func ParseConfig(filePath string, logger *logrus.Logger) Config {
 	config := Config{
 		NodeConfig:    nodeConfig,
 		ClusterConfig: clusterConfig,
+		LogLevel:      interConfig.LogLevel,
 	}
 	return config
 }
@@ -79,28 +80,32 @@ func ParseConfig(filePath string, logger *logrus.Logger) Config {
 func buildNode(interConfig internalConfig) (NodeConfig, *NodeInfo) {
 	nodeConfig := NodeConfig{}
 	selfNode := &NodeInfo{
-		Id:               interConfig.NodeId,
-		Ip:               interConfig.NodeIp,
-		Addr:             interConfig.NodeIp + ":" + strconv.Itoa(interConfig.NodeInternalPort),
-		IsCandidate:      interConfig.IsCandidate,
-		externalHttpPort: interConfig.ClientHttpPort,
-		externalTcpPort:  interConfig.ClientTcpPort,
-		InternalPort:     interConfig.NodeInternalPort,
+		Id:                    interConfig.NodeId,
+		Ip:                    interConfig.NodeIp,
+		Addr:                  interConfig.NodeIp + ":" + strconv.Itoa(interConfig.NodeInternalPort),
+		IsCandidate:           interConfig.IsCandidate,
+		externalHttpPort:      interConfig.ClientHttpPort,
+		externalTcpPort:       interConfig.ClientTcpPort,
+		InternalPort:          interConfig.NodeInternalPort,
+		AutoJoinClusterEnable: interConfig.AutoJoinClusterEnable,
 	}
 	nodeConfig.SelfNode = selfNode
 	nodeConfig.LogDir = interConfig.LogDir
 	nodeConfig.DataDir = interConfig.DataDir
+	nodeConfig.HeartbeatInterval = interConfig.ClusterHeartbeatInterval
 	return nodeConfig, selfNode
 }
 
 func buildClusterConfig(selfNode *NodeInfo, interConfig internalConfig) ClusterConfig {
 	clusterConfig := ClusterConfig{
 		SelfNode:                 selfNode,
+		StartupMode:              interConfig.StartupMode,
 		ClusterHeartbeatInterval: interConfig.ClusterHeartbeatInterval,
 		ClusterQuorumCount:       interConfig.ClusterQuorumCount,
 		AutoJoinClusterEnable:    interConfig.AutoJoinClusterEnable,
 		RaftHeartbeatTimeout:     interConfig.RaftHeartbeatTimeout,
 		RaftElectionTimeout:      interConfig.RaftElectionTimeout,
+		LogLevel:                 interConfig.LogLevel,
 	}
 
 	clusterConfig.ClusterServers = make(map[string]*NodeInfo)
@@ -129,8 +134,20 @@ func buildClusterConfig(selfNode *NodeInfo, interConfig internalConfig) ClusterC
 	return clusterConfig
 }
 
-func setConfigProperty(config *internalConfig, prop property, val string) {
+func setInternalConfigProperty(config *internalConfig, prop property, val string) {
 	elems := reflect.ValueOf(config).Elem()
+	setConfigProperty(elems, prop, val)
+}
+func SetClusterConfigProperty(config *ClusterConfig, prop property, val string) {
+	elems := reflect.ValueOf(config).Elem()
+	setConfigProperty(elems, prop, val)
+}
+func SetConfigProperty(config *Config, prop property, val string) {
+	elems := reflect.ValueOf(config).Elem()
+	setConfigProperty(elems, prop, val)
+}
+
+func setConfigProperty(elems reflect.Value, prop property, val string) {
 	field := elems.FieldByName(prop.propName)
 	defer func() {
 		if r := recover(); r != nil {
@@ -140,7 +157,7 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 	}()
 	if field.IsValid() && field.CanSet() {
 		if field.Kind() == reflect.Array && prop.parseHandler != nil {
-			newValues := prop.parseHandler(val, prop.options)
+			newValues := prop.parseHandler(val, prop.key, prop.Options)
 			field.Set(reflect.ValueOf(newValues))
 			return
 		}
@@ -153,7 +170,7 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 				return
 			}
 			if prop.parseHandler != nil {
-				v := prop.parseHandler(val, prop.options)
+				v := prop.parseHandler(val, prop.key, prop.Options)
 				field.Set(reflect.ValueOf(v))
 				return
 			}
@@ -168,7 +185,7 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 				return
 			}
 			if prop.parseHandler != nil {
-				prop.parseHandler(val, prop.options)
+				prop.parseHandler(val, prop.key, prop.Options)
 			}
 			intVal, err := strconv.ParseInt(strVal, 10, 64)
 			if err != nil {
@@ -186,7 +203,7 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 				return
 			}
 			if prop.parseHandler != nil {
-				v := prop.parseHandler(val, prop.options)
+				v := prop.parseHandler(val, prop.key, prop.Options)
 				field.Set(reflect.ValueOf(v))
 				return
 			}
@@ -197,6 +214,17 @@ func setConfigProperty(config *internalConfig, prop property, val string) {
 			}
 			field.SetBool(bVal)
 		default:
+			if val == "" {
+				log.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
+				valueOf := reflect.ValueOf(prop.defaultVal)
+				field.Set(valueOf.Convert(field.Type()))
+				return
+			}
+			if prop.parseHandler != nil {
+				v := prop.parseHandler(val, prop.key, prop.Options)
+				field.Set(reflect.ValueOf(v))
+				return
+			}
 			ret := reflect.ValueOf(val)
 			field.Set(ret.Convert(field.Type()))
 		}

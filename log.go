@@ -43,7 +43,7 @@ func (t LogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	} else {
 		buffer = &bytes.Buffer{}
 	}
-	//自定义日期格式
+
 	timestamp := entry.Time.Format("2006-01-02 15:04:06")
 	if entry.HasCaller() {
 		// customize the file path
@@ -60,14 +60,14 @@ func (t LogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 }
 
 // init logrus
-func initLogger(logDir string) {
+func initLogger(logDir string, logLevel logrus.Level) {
 
 	if _, err := os.Stat(logDir); os.IsNotExist(err) {
-		os.MkdirAll(logDir, 0755)
+		_ = os.MkdirAll(logDir, 0755)
 	}
 
 	log.SetReportCaller(true)
-	log.SetLevel(logrus.InfoLevel)
+	log.SetLevel(logLevel)
 	log.SetFormatter(&LogFormatter{})
 
 	infoLog, err := rotatelogs.New(logDir+"/%Y%m%d.info.log",

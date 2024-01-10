@@ -3,6 +3,7 @@ package core
 import (
 	"github.com/linkypi/hiraeth.registry/config"
 	cluster "github.com/linkypi/hiraeth.registry/core/cluster"
+	"github.com/linkypi/hiraeth.registry/core/cluster/rpc"
 	network "github.com/linkypi/hiraeth.registry/core/network"
 	"github.com/linkypi/hiraeth.registry/core/service"
 	"github.com/sirupsen/logrus"
@@ -15,10 +16,11 @@ import (
 )
 
 type Node struct {
-	log        *logrus.Logger
-	selfNode   *config.NodeInfo
-	myCluster  *cluster.Cluster
-	NodeConfig config.NodeConfig
+	log      *logrus.Logger
+	selfNode *config.NodeInfo
+	//myCluster  *cluster.Cluster
+	rpcService *rpc.ClusterRpcService
+	Config     config.NodeConfig
 	Network    *network.NetworkManager
 	socket     net.Listener
 	grpcServer *grpc.Server
@@ -28,13 +30,14 @@ type Node struct {
 func NewNode(config config.Config, logger *logrus.Logger) *Node {
 	return &Node{
 		selfNode:   config.NodeConfig.SelfNode,
-		NodeConfig: config.NodeConfig,
+		Config:     config.NodeConfig,
+		rpcService: rpc.NewCRpcService(),
 		log:        logger}
 }
 
 func (n *Node) Start(clusterConfig *config.ClusterConfig) {
 
-	n.Network = network.NewNetworkManager(n.selfNode.Addr)
+	n.Network = network.NewNetworkManager(n.selfNode.Addr, n.log)
 
 	// since grpc will enter a loop after starting
 	// we need to use a channel to notify grpcServer
@@ -51,9 +54,10 @@ func (n *Node) Start(clusterConfig *config.ClusterConfig) {
 		return
 	}
 
-	if !n.NodeConfig.StandAlone {
-		n.myCluster = cluster.NewCluster(clusterConfig, n.selfNode, n.Network, n.shutDownCh, n.log)
-		go n.myCluster.Start(n.NodeConfig.DataDir)
+	if clusterConfig.StartupMode == config.Cluster {
+		myCluster := cluster.NewCluster(clusterConfig, n.selfNode, n.Network, n.shutDownCh, n.log)
+		n.rpcService.SetCluster(myCluster)
+		go myCluster.Start(n.Config.DataDir)
 	}
 
 	select {
@@ -84,13 +88,13 @@ func (n *Node) startGRPCServer(grpcAssignCh chan struct{}) {
 		// Allow 5 seconds for pending RPCs to complete before forcibly closing connections
 		MaxConnectionAgeGrace: 5 * time.Second,
 		// Ping the client if it is idle for 5 seconds to ensure the connection is still active
-		Time: time.Duration(n.myCluster.Config.ClusterHeartbeatInterval) * time.Second,
+		Time: time.Duration(n.Config.HeartbeatInterval) * time.Second,
 		// Wait 1 second for the ping ack before assuming the connection is dead
 		Timeout: 1 * time.Second,
 	}
 
 	grpcServer := grpc.NewServer(grpc.KeepaliveEnforcementPolicy(kaep), grpc.KeepaliveParams(kasp))
-	service.RegisterRpcService(grpcServer, n.myCluster, n.Network)
+	service.RegisterRpcService(grpcServer, n.rpcService, n.Network)
 
 	n.grpcServer = grpcServer
 	reflection.Register(grpcServer)

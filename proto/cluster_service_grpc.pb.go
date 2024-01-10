@@ -22,6 +22,8 @@ const _ = grpc.SupportPackageIsVersion7
 const (
 	ClusterService_GetNodeInfo_FullMethodName               = "/ClusterService/GetNodeInfo"
 	ClusterService_ForwardJoinClusterRequest_FullMethodName = "/ClusterService/ForwardJoinClusterRequest"
+	ClusterService_JoinCluster_FullMethodName               = "/ClusterService/JoinCluster"
+	ClusterService_TransferLeadership_FullMethodName        = "/ClusterService/TransferLeadership"
 )
 
 // ClusterServiceClient is the client API for ClusterService service.
@@ -30,6 +32,8 @@ const (
 type ClusterServiceClient interface {
 	GetNodeInfo(ctx context.Context, in *NodeInfoRequest, opts ...grpc.CallOption) (*NodeInfoResponse, error)
 	ForwardJoinClusterRequest(ctx context.Context, in *JoinClusterRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	JoinCluster(ctx context.Context, in *JoinClusterRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	TransferLeadership(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 }
 
 type clusterServiceClient struct {
@@ -58,12 +62,32 @@ func (c *clusterServiceClient) ForwardJoinClusterRequest(ctx context.Context, in
 	return out, nil
 }
 
+func (c *clusterServiceClient) JoinCluster(ctx context.Context, in *JoinClusterRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, ClusterService_JoinCluster_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterServiceClient) TransferLeadership(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, ClusterService_TransferLeadership_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ClusterServiceServer is the server API for ClusterService service.
 // All implementations should embed UnimplementedClusterServiceServer
 // for forward compatibility
 type ClusterServiceServer interface {
 	GetNodeInfo(context.Context, *NodeInfoRequest) (*NodeInfoResponse, error)
 	ForwardJoinClusterRequest(context.Context, *JoinClusterRequest) (*emptypb.Empty, error)
+	JoinCluster(context.Context, *JoinClusterRequest) (*emptypb.Empty, error)
+	TransferLeadership(context.Context, *TransferRequest) (*emptypb.Empty, error)
 }
 
 // UnimplementedClusterServiceServer should be embedded to have forward compatible implementations.
@@ -75,6 +99,12 @@ func (UnimplementedClusterServiceServer) GetNodeInfo(context.Context, *NodeInfoR
 }
 func (UnimplementedClusterServiceServer) ForwardJoinClusterRequest(context.Context, *JoinClusterRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ForwardJoinClusterRequest not implemented")
+}
+func (UnimplementedClusterServiceServer) JoinCluster(context.Context, *JoinClusterRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method JoinCluster not implemented")
+}
+func (UnimplementedClusterServiceServer) TransferLeadership(context.Context, *TransferRequest) (*emptypb.Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransferLeadership not implemented")
 }
 
 // UnsafeClusterServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -124,6 +154,42 @@ func _ClusterService_ForwardJoinClusterRequest_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ClusterService_JoinCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(JoinClusterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterServiceServer).JoinCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterService_JoinCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterServiceServer).JoinCluster(ctx, req.(*JoinClusterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClusterService_TransferLeadership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransferRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterServiceServer).TransferLeadership(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterService_TransferLeadership_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterServiceServer).TransferLeadership(ctx, req.(*TransferRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ClusterService_ServiceDesc is the grpc.ServiceDesc for ClusterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -138,6 +204,14 @@ var ClusterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForwardJoinClusterRequest",
 			Handler:    _ClusterService_ForwardJoinClusterRequest_Handler,
+		},
+		{
+			MethodName: "JoinCluster",
+			Handler:    _ClusterService_JoinCluster_Handler,
+		},
+		{
+			MethodName: "TransferLeadership",
+			Handler:    _ClusterService_TransferLeadership_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

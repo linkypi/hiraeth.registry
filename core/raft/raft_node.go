@@ -14,45 +14,50 @@ import (
 )
 
 type RaftNode struct {
-	manager *core.NetworkManager
-	log     logrus.Logger
+	net *core.NetworkManager
+	log logrus.Logger
 }
 
 func (rn *RaftNode) SetNetWorkManager(manager *core.NetworkManager) {
-	rn.manager = manager
+	rn.net = manager
 }
 
 // transport returns a raft.Transport that communicates over gRPC.
 func (rn *RaftNode) transport() raft.Transport {
-	return raftAPI{rn.manager}
+	return raftAPI{rn.net}
 }
 
 func RegisterRaftTransportService(grpcServer *grpc.Server, net *core.NetworkManager) {
-	pb.RegisterRaftTransportServer(grpcServer, grpcAPI{manager: net})
+	pb.RegisterRaftTransportServer(grpcServer, grpcAPI{net: net})
 }
 
 func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server, clusterConfig config.ClusterConfig,
 	notifyCh chan bool, fsm raft.FSM) (*raft.Raft, error) {
 
 	conf := raft.DefaultConfig()
+	conf.NotifyCh = notifyCh
+	conf.LogOutput = rn.log.Out
+	conf.LocalID = raft.ServerID(nodeId)
+	conf.ProtocolVersion = raft.ProtocolVersionMax
+	conf.LogLevel = clusterConfig.LogLevel.String()
 	conf.HeartbeatTimeout = time.Duration(clusterConfig.RaftHeartbeatTimeout) * time.Millisecond
 	conf.ElectionTimeout = time.Duration(clusterConfig.RaftElectionTimeout) * time.Millisecond
-	conf.NotifyCh = notifyCh
-	conf.LocalID = raft.ServerID(nodeId)
 
 	baseDir := dataDir + "/" + "raft"
 	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
 		err = os.MkdirAll(baseDir, 0755)
-		return nil, fmt.Errorf(`create raft data dir [%s] failed: %v`, baseDir, err)
+		if err != nil {
+			return nil, fmt.Errorf(`create raft data dir [%s] failed: %v`, baseDir, err)
+		}
 	}
 
-	logPath := baseDir + "/logs.dat"
+	logPath := baseDir + "/logs.db"
 	ldb, err := boltdb.NewBoltStore(logPath)
 	if err != nil {
 		return nil, fmt.Errorf(`boltdb create log store failed(%q): %v`, logPath, err)
 	}
 
-	stablePath := baseDir + "/stable.dat"
+	stablePath := baseDir + "/stable.db"
 	sdb, err := boltdb.NewBoltStore(stablePath)
 	if err != nil {
 		return nil, fmt.Errorf(`boltdb create stable store failed(%q): %v`, stablePath, err)
@@ -71,21 +76,44 @@ func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server, clusterCo
 	cfg := raft.Configuration{Servers: peers}
 
 	// use boltDb to read the value of the key [CurrentTerm] to determine whether a cluster exists
-	// If the cluster already exists, use raft.RecoverCluster() method to restore the cluster
-	state, err := raft.HasExistingState(ldb, sdb, fss)
-	if state && err == nil {
-		rn.log.Info("raft cluster already exists, restore cluster instead.")
-		err := raft.RecoverCluster(conf, fsm, ldb, sdb, fss, rn.transport(), cfg)
-		if err != nil {
-			return r, err
-		}
-		return r, nil
+	// If the cluster state not exists, use r.BootstrapCluster() method to create a new one
+	existState, err := raft.HasExistingState(ldb, sdb, fss)
+	if err != nil {
+		return nil, fmt.Errorf("raft check existing state failed: %v", err)
 	}
-
-	fur := r.BootstrapCluster(cfg)
-	if err := fur.Error(); err != nil {
-		return nil, fmt.Errorf("raft bootstrap cluster failed: %v", err)
+	if !existState {
+		fur := r.BootstrapCluster(cfg)
+		if err := fur.Error(); err != nil {
+			return nil, fmt.Errorf("raft bootstrap cluster failed: %v", err)
+		}
 	}
 
 	return r, nil
 }
+
+//func (rn *RaftNode) RecoverRaftCluster(protocolVersion int, peersFile string) error {
+//	rn.log.Info("found peers.json file, recovering Raft configuration...")
+//
+//	var configuration raft.Configuration
+//	var err error
+//	if protocolVersion < 3 {
+//		configuration, err = raft.ReadPeersJSON(peersFile)
+//	} else {
+//		configuration, err = raft.ReadConfigJSON(peersFile)
+//	}
+//	if err != nil {
+//		return fmt.Errorf("recovery failed to parse peers.json: %v", err)
+//	}
+//
+//	tmpFsm := &raftFsm{}
+//	if err := raft.RecoverCluster(s.config.RaftConfig, tmpFsm,
+//		log, stable, snap, trans, configuration); err != nil {
+//		return fmt.Errorf("recovery failed: %v", err)
+//	}
+//
+//	if err := os.Remove(peersFile); err != nil {
+//		return fmt.Errorf("recovery failed to delete peers.json, please delete manually (see peers.info for details): %v", err)
+//	}
+//	rn.log.Info("deleted peers.json file after successful recovery")
+//	return nil
+//}

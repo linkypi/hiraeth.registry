@@ -5,12 +5,18 @@ option go_package = "../proto";
 service ClusterService {
   rpc GetNodeInfo(NodeInfoRequest) returns (NodeInfoResponse) {}
   rpc ForwardJoinClusterRequest(JoinClusterRequest)returns(google.protobuf.Empty){}
+  rpc JoinCluster(JoinClusterRequest)returns(google.protobuf.Empty){}
+  rpc TransferLeadership(TransferRequest)returns(google.protobuf.Empty){}
 }
-
+message TransferRequest {
+  string nodeId = 1;
+  string nodeAddr = 2;
+}
 message JoinClusterRequest {
   string nodeId = 1;
   string nodeAddr = 2;
   bool autoJoinClusterEnable=3;
+  bool isCandidate = 4;
 }
 
 // Bring the current node information

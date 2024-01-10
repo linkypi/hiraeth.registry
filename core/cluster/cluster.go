@@ -11,34 +11,60 @@ import (
 )
 
 type Cluster struct {
+	*network.NetworkManager
 	Log                 *logrus.Logger
+	State               State
 	SelfNode            *config.NodeInfo
+	Leader              config.NodeInfo
 	ClusterServers      map[string]*config.NodeInfo
 	OtherCandidateNodes []config.NodeInfo
 
-	Config *config.ClusterConfig
-	Raft   *raft.Raft
-	net    *network.NetworkManager
-
+	Raft           *raft.Raft
+	Config         *config.ClusterConfig
 	ShutDownCh     chan struct{}
 	notifyLeaderCh chan bool
 }
 
+type State int
+
+const (
+	// Active The cluster is active and can be read and written to
+	Active State = iota
+	// StandBy The cluster is in a standby state and can only be read
+	// It's possible that the cluster is electing a leader
+	StandBy
+	// Maintenance The cluster is in a maintenance state and cannot be read or written
+	Maintenance
+	Unknown
+)
+
 func NewCluster(clusterConfig *config.ClusterConfig, selfNode *config.NodeInfo,
 	net *network.NetworkManager, shutDownCh chan struct{}, log *logrus.Logger) *Cluster {
-	return &Cluster{
+	cluster := Cluster{
 		Log:            log,
-		net:            net,
+		State:          StandBy,
 		Config:         clusterConfig,
 		SelfNode:       selfNode,
 		ShutDownCh:     shutDownCh,
+		notifyLeaderCh: make(chan bool, 10),
 		ClusterServers: clusterConfig.ClusterServers,
 	}
+	cluster.setNet(net)
+	return &cluster
 }
 
-func (c *Cluster) ExistNode(id string) bool {
-	_, ok := c.ClusterServers[id]
-	return ok
+func (c *Cluster) setNet(net *network.NetworkManager) {
+	c.NetworkManager = net
+}
+
+func (c *Cluster) RaftExistNode(id string) bool {
+	servers := c.Raft.GetConfiguration().Configuration().Servers
+	for _, server := range servers {
+		if string(server.ID) == id {
+			return true
+		}
+	}
+	return false
 }
 
 // GetOtherCandidateServers get other candidate servers, exclude self node
@@ -96,33 +122,61 @@ func (c *Cluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode config.N
 	if node.IsCandidate {
 		c.OtherCandidateNodes = append(c.OtherCandidateNodes, *node)
 	}
-	c.Log.Debugf("[cluster] update remote node info success: %s, %s", remoteNode.Id, remoteNode.Addr)
+	c.Log.Infof("[cluster] update remote node info: %s, %s", remoteNode.Id, remoteNode.Addr)
 	return nil
 }
 
-func (c *Cluster) AddNewNode(node *config.NodeInfo) {
+func (c *Cluster) isLeader() bool {
+	return c.Raft.State() == raft.Leader
+}
 
-	_, leaderId := c.Raft.LeaderWithID()
+func (c *Cluster) AddNewNode(remoteNode *config.NodeInfo) {
+
+	if c.Raft == nil {
+		c.Log.Errorf("[cluster] raft is nil, can not add new node, node id: %s, node addr: %s", remoteNode.Id, remoteNode.Addr)
+		return
+	}
+	// Check whether the connection of the new node exists, and if not, establish the connection first
+	if !c.ExistConn(remoteNode.Id) {
+		c.connectToNode(*remoteNode)
+	}
 	// only the leader node has the permission to add nodes, otherwise the addition fails
-	if raft.ServerID(c.SelfNode.Id) == leaderId {
-		indexFur := c.Raft.AddVoter(
-			raft.ServerID(node.Id),
-			raft.ServerAddress(node.Addr),
-			c.Raft.AppliedIndex(),
-			3*time.Second,
-		)
+	if c.isLeader() {
+		var indexFur raft.IndexFuture
+		if remoteNode.IsCandidate {
+			indexFur = c.Raft.AddVoter(
+				raft.ServerID(remoteNode.Id),
+				raft.ServerAddress(remoteNode.Addr),
+				0,
+				3*time.Second,
+			)
+		} else {
+			indexFur = c.Raft.AddNonvoter(
+				raft.ServerID(remoteNode.Id),
+				raft.ServerAddress(remoteNode.Addr),
+				0,
+				3*time.Second,
+			)
+		}
 
 		err := indexFur.Error()
 		if err != nil {
-			c.Log.Errorf("[cluster] add new node to cluster failed, node id: %s, addr: %s. %v", node.Id, node.Addr, err)
+			// 稍后重试, 有可能配置
+			// add later , configuration changed since 30 (latest is 1)
+			c.Log.Errorf("[cluster] add new node to cluster failed, node id: %s, addr: %s. %v", remoteNode.Id, remoteNode.Addr, err)
 			return
 		}
 
-		c.Log.Infof("[cluster] add new node to cluster success, node id: %s, addr: %s", node.Id, node.Addr)
+		c.Log.Infof("[cluster] add new node to cluster success, node id: %s, addr: %s", remoteNode.Id, remoteNode.Addr)
 		return
 	}
+}
 
-	// forward the request to the leader node for addition
-	c.Log.Infof("[cluster] forwarding the request to the leader node for addition, node id: %s, addr: %s", node.Id, node.Addr)
-
+func (c *Cluster) UpdateLeader(id, addr string) {
+	leader := config.NodeInfo{
+		Id:   id,
+		Addr: addr,
+	}
+	c.Leader = leader
+	c.State = Active
 }

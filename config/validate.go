@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func validateIP(ip string, opts []string) any {
+func validateIP(ip, key string, opts []kv) any {
 	clusterRegexCompile := regexp.MustCompile("\\d+\\.\\d+\\.\\d+\\.\\d+")
 	match := clusterRegexCompile.MatchString(ip)
 	if !match {
@@ -16,28 +16,24 @@ func validateIP(ip string, opts []string) any {
 	return ip
 }
 
-// 可能的选项
-func validateStartupMode(mode string, opts []string) any {
-
+func ParseByDefaultOpts(val, key string, opts []kv) any {
 	if opts == nil {
-		log.Error("property " + StartupMode + "'s options must not be empty. ")
+		log.Error("property " + key + "'s options must not be empty. ")
 		os.Exit(1)
 	}
-	exist := false
+
 	for _, opt := range opts {
-		if mode == opt {
-			exist = true
-			break
+		if val == opt.key {
+			return opt.val
 		}
 	}
-	if !exist {
-		log.Errorf("property %s's value doesn't match the elements provided in options: %s", StartupMode, mode)
-		os.Exit(1)
-	}
-	return mode
+
+	log.Errorf("property %s's value doesn't match the elements provided in options: %s", StartupMode, val)
+	os.Exit(1)
+	return nil
 }
 
-func parseClusterServers(ctrlCandidateServers string, opts []string) any {
+func parseClusterServers(ctrlCandidateServers, key string, opts []kv) any {
 	parts := strings.Split(ctrlCandidateServers, ",")
 	clusterServers := make([]string, len(parts))
 
@@ -54,7 +50,7 @@ func parseClusterServers(ctrlCandidateServers string, opts []string) any {
 	return clusterServers
 }
 
-func validateNumber(id string, opts []string) any {
+func validateNumber(id, key string, opts []kv) any {
 	clusterRegexCompile := regexp.MustCompile("\\d+")
 	match := clusterRegexCompile.MatchString(id)
 	if !match {

@@ -14,21 +14,21 @@ import (
 // These are calls from the Raft engine that we need to send out over gRPC.
 
 type raftAPI struct {
-	manager *core.NetworkManager
+	net *core.NetworkManager
 }
 
 // Consumer returns a channel that can be used to consume and respond to RPC requests.
 func (r raftAPI) Consumer() <-chan raft.RPC {
-	return r.manager.RpcChan
+	return r.net.RpcChan
 }
 
 // LocalAddr is used to return our local address to distinguish from our peers.
 func (r raftAPI) LocalAddr() raft.ServerAddress {
-	return r.manager.LocalAddress
+	return r.net.LocalAddress
 }
 
 func (r raftAPI) getPeer(id raft.ServerID, target raft.ServerAddress) (pb.RaftTransportClient, error) {
-	return r.manager.GetRaftClient(id)
+	return r.net.GetRaftClient(string(id))
 }
 
 // AppendEntries sends the appropriate RPC to the target node.
@@ -38,9 +38,9 @@ func (r raftAPI) AppendEntries(id raft.ServerID, target raft.ServerAddress, args
 		return err
 	}
 	ctx := context.TODO()
-	if r.manager.HeartbeatTimeout > 0 && isHeartbeat(args) {
+	if r.net.HeartbeatTimeout > 0 && isHeartbeat(args) {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.manager.HeartbeatTimeout)
+		ctx, cancel = context.WithTimeout(ctx, r.net.HeartbeatTimeout)
 		defer cancel()
 	}
 	ret, err := c.AppendEntries(ctx, encodeAppendEntriesRequest(args))
@@ -252,7 +252,7 @@ func (r raftAPI) DecodePeer(p []byte) raft.ServerAddress {
 // disk IO. If a Transport does not support this, it can simply
 // ignore the call, and push the heartbeat onto the Consumer channel.
 func (r raftAPI) SetHeartbeatHandler(cb func(rpc raft.RPC)) {
-	r.manager.HeartbeatFuncMtx.Lock()
-	r.manager.HeartbeatFunc = cb
-	r.manager.HeartbeatFuncMtx.Unlock()
+	r.net.HeartbeatFuncMtx.Lock()
+	r.net.HeartbeatFunc = cb
+	r.net.HeartbeatFuncMtx.Unlock()
 }

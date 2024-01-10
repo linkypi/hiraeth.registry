@@ -12,7 +12,7 @@ import (
 // These are requests incoming over gRPC that we need to relay to the Raft engine.
 
 type grpcAPI struct {
-	manager *core.NetworkManager
+	net *core.NetworkManager
 
 	// "Unsafe" to ensure compilation fails if new methods are added but not implemented
 	pb.UnsafeRaftTransportServer
@@ -27,15 +27,15 @@ func (g grpcAPI) handleRPC(command interface{}, data io.Reader) (interface{}, er
 	}
 	if isHeartbeat(command) {
 		// We can take the fast path and use the heartbeat callback and skip the queue in g.manager.rpcChan.
-		g.manager.HeartbeatFuncMtx.Lock()
-		fn := g.manager.HeartbeatFunc
-		g.manager.HeartbeatFuncMtx.Unlock()
+		g.net.HeartbeatFuncMtx.Lock()
+		fn := g.net.HeartbeatFunc
+		g.net.HeartbeatFuncMtx.Unlock()
 		if fn != nil {
 			fn(rpc)
 			goto wait
 		}
 	}
-	g.manager.RpcChan <- rpc
+	g.net.RpcChan <- rpc
 wait:
 	resp := <-ch
 	if resp.Error != nil {

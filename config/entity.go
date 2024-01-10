@@ -1,5 +1,7 @@
 package config
 
+import "github.com/sirupsen/logrus"
+
 // server node Info
 type NodeInfo struct {
 	Id                    string
@@ -11,7 +13,10 @@ type NodeInfo struct {
 	IsCandidate           bool
 	AutoJoinClusterEnable bool
 }
-
+type kv struct {
+	key string
+	val any
+}
 type property struct {
 	key      string
 	propName string
@@ -20,8 +25,8 @@ type property struct {
 	dataType     string
 	require      bool
 	defaultVal   any
-	parseHandler func(val string, ops []string) any
-	options      []string
+	parseHandler func(val, key string, ops []kv) any
+	Options      []kv
 }
 
 const (
@@ -48,18 +53,22 @@ const (
 	// The default startup mode is stand-alone mode, which is used for local development and testing
 	// and the cluster mode is used in the production environment. There are two options: stand-alone, cluster.
 	StartupMode = "startup.mode"
+	// LogLevel specify the log level, with the following values: debug, info, warn, error, fatal.
+	// The default log level is info
+	LogLevel = "log.level"
 )
 
 type Config struct {
 	NodeConfig    NodeConfig
 	ClusterConfig ClusterConfig
+	LogLevel      logrus.Level
 }
 
 type NodeConfig struct {
-	SelfNode   *NodeInfo
-	DataDir    string
-	LogDir     string
-	StandAlone bool
+	SelfNode          *NodeInfo
+	DataDir           string
+	LogDir            string
+	HeartbeatInterval int
 }
 
 type StartUpMode int
@@ -80,6 +89,7 @@ type ClusterConfig struct {
 	RaftElectionTimeout      int
 	RaftHeartbeatTimeout     int
 	AutoJoinClusterEnable    bool
+	LogLevel                 logrus.Level
 }
 
 type internalConfig struct {
@@ -98,8 +108,31 @@ type internalConfig struct {
 	RaftElectionTimeout      int
 	RaftHeartbeatTimeout     int
 
-	DataDir string
-	LogDir  string
+	DataDir  string
+	LogDir   string
+	LogLevel logrus.Level
+}
+
+var StartupModeProp = property{
+	dataType:     "",
+	propName:     "StartupMode",
+	key:          StartupMode,
+	require:      false,
+	defaultVal:   StandAlone,
+	parseHandler: ParseByDefaultOpts,
+	Options:      []kv{{key: "cluster", val: Cluster}, {key: "stand-alone", val: StandAlone}},
+}
+
+var LogLevelProp = property{
+	dataType:     "",
+	propName:     "LogLevel",
+	key:          LogLevel,
+	require:      false,
+	defaultVal:   "info",
+	parseHandler: ParseByDefaultOpts,
+	Options: []kv{{key: "info", val: logrus.InfoLevel}, {key: "debug", val: logrus.DebugLevel},
+		{key: "fatal", val: logrus.FatalLevel}, {key: "error", val: logrus.ErrorLevel}, {key: "warn", val: logrus.WarnLevel},
+	},
 }
 
 func init() {
@@ -175,15 +208,8 @@ func init() {
 		require:    false,
 		defaultVal: 1000,
 	})
-	properties = append(properties, property{
-		dataType:     "",
-		propName:     "StartupMode",
-		key:          StartupMode,
-		require:      false,
-		defaultVal:   "stand-alone",
-		parseHandler: validateStartupMode,
-		options:      []string{"cluster", "stand-alone"},
-	})
+	properties = append(properties, StartupModeProp)
+	properties = append(properties, LogLevelProp)
 	properties = append(properties, property{dataType: "int", propName: "ClientHttpPort", key: ClientHttpPort, require: false, defaultVal: 5042})
 	properties = append(properties, property{dataType: "int", propName: "ClientTcpPort", key: ClientTcpPort, require: false, defaultVal: 5386})
 	properties = append(properties, property{dataType: "string", propName: "DataDir", key: DataDir, require: false, defaultVal: "./data"})
