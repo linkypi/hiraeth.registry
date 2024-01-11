@@ -19,21 +19,44 @@
 向集群新增节点时，首先判断auto.join.cluster.enable是否已开启，默认关闭。
 
 - 若未开启，则考虑实现一个控制台命令来将新节点加入集群
-- 若已开启，则新节点启动后会主动连接集群节点，然后启动raft。 集群节点收到新节点元数据信息后，判断新节点是否是集群新加入的节点，同时是否已开启auto.join.cluster.enable ，若是新节点并且已开启该开关则将该节点加入到Raft集群。注意，只有leader才可以执行该操作，若是非leader节点接收到该请求则需要转发到leader在处理
+- 若已开启，则新节点启动后会主动连接集群节点，然后启动raft。 集群节点收到新节点元数据信息后，判断新节点是否是集群新加入的节点，同时是否已开启 auto.join.cluster.enable ，若是新节点并且已开启该开关则将该节点加入到Raft集群。注意，只有leader才可以执行该操作，若是非leader节点接收到该请求则需要转发到leader再处理
+
+测试节点加入集群
+
+```sh
+# 首先启动三个节点组成的集群
+hiraeth.registry -config=./config/registry1.conf
+hiraeth.registry -config=./config/registry2.conf
+hiraeth.registry -config=./config/registry3.conf
+
+# 待集群启动完成后，启动新节点，并带上 -join 参数（-join 或者 --join 亦可）
+hiraeth.registry -config=./config/registry4.conf -join
+```
+
+
 
 raft启动需注意区分当前系统是否已有数据，有数据则恢复集群，否则新建集群：
+
 ```golang
-    state, err := raft.HasExistingState(ldb, sdb, fss)
-	if state && err == nil {
-		rn.log.Info("raft cluster already exists, restore cluster instead.")
-		err := raft.RecoverCluster(conf, fsm, ldb, sdb, fss, rn.transport(), cfg)
-		if err != nil {
-			return r, err
-		}
-		return r, nil
+   	r, err := raft.NewRaft(conf, fsm, ldb, sdb, fss, rn.transport())
+	if err != nil {
+		return nil, fmt.Errorf("raft.NewRaft: %v", err)
 	}
 
-	f := r.BootstrapCluster(cfg)
+	cfg := raft.Configuration{Servers: peers}
+
+	// use boltDb to read the value of the key [CurrentTerm] to determine whether a cluster exists
+	// If the cluster state not exists, use r.BootstrapCluster() method to create a new one
+	existState, err := raft.HasExistingState(ldb, sdb, fss)
+	if err != nil {
+		return nil, fmt.Errorf("raft check existing state failed: %v", err)
+	}
+	if !existState {
+		fur := r.BootstrapCluster(cfg)
+		if err := fur.Error(); err != nil {
+			return nil, fmt.Errorf("raft bootstrap cluster failed: %v", err)
+		}
+	}
 ```
 
 ``` sh

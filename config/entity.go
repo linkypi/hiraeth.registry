@@ -62,6 +62,8 @@ type Config struct {
 	NodeConfig    NodeConfig
 	ClusterConfig ClusterConfig
 	LogLevel      logrus.Level
+	JoinCluster   bool
+	StartupMode   StartUpMode
 }
 
 type NodeConfig struct {
@@ -82,7 +84,6 @@ type ClusterConfig struct {
 	SelfNode            *NodeInfo
 	OtherCandidateNodes []NodeInfo
 
-	StartupMode              StartUpMode
 	ClusterServers           map[string]*NodeInfo
 	ClusterHeartbeatInterval int
 	ClusterQuorumCount       int
@@ -92,6 +93,7 @@ type ClusterConfig struct {
 	LogLevel                 logrus.Level
 }
 
+// Use reflection to set properties, all of which must be public
 type internalConfig struct {
 	NodeId           string
 	NodeIp           string
@@ -99,6 +101,7 @@ type internalConfig struct {
 	ClientHttpPort   int
 	ClientTcpPort    int
 
+	JoinCluster              bool
 	StartupMode              StartUpMode
 	IsCandidate              bool
 	ClusterServers           []string

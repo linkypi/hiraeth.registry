@@ -69,7 +69,7 @@ func (net *NetworkManager) GetRaftClient(id string) (pb.RaftTransportClient, err
 	return net.Connections[id].raftClient, nil
 }
 
-func (net *NetworkManager) GetInternalClient(id string) pb.ClusterServiceClient {
+func (net *NetworkManager) GetInterRpcClient(id string) pb.ClusterServiceClient {
 	if !net.ExistConn(id) {
 		return nil
 	}
@@ -116,7 +116,7 @@ func (net *NetworkManager) AddConn(id string, grpcConn *grpc.ClientConn,
 	}
 }
 
-func (net *NetworkManager) Close() error {
+func (net *NetworkManager) CloseAllConn() error {
 	net.ConnectionsMtx.Lock()
 	defer net.ConnectionsMtx.Unlock()
 
@@ -135,6 +135,25 @@ func (net *NetworkManager) Close() error {
 		return err
 	}
 
+	return nil
+}
+
+func (net *NetworkManager) CloseConn(nodeId string) error {
+	net.ConnectionsMtx.Lock()
+	defer net.ConnectionsMtx.Unlock()
+
+	for id, conn := range net.Connections {
+		if id != nodeId {
+			continue
+		}
+		conn.mtx.Lock()
+		conn.mtx.Unlock()
+		closeErr := conn.grpcConn.Close()
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	delete(net.Connections, nodeId)
 	return nil
 }
 

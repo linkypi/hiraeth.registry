@@ -14,56 +14,7 @@ import (
 	"time"
 )
 
-func (c *Cluster) Start(dataDir string) {
-	// try connecting to other candidate nodes
-	go c.connectOtherCandidateNodes()
-
-	// wait for the quorum nodes to be connected
-	for len(c.Connections)+1 < c.Config.ClusterQuorumCount {
-		time.Sleep(200 * time.Millisecond)
-		select {
-		case <-c.ShutDownCh:
-			c.Shutdown()
-			return
-		default:
-		}
-	}
-
-	// start the raft server
-	c.startRaftNode(dataDir)
-
-	go c.monitoringLeadershipTransfer()
-
-	go c.CheckConnClosed(c.ShutDownCh, func(id string) {
-		nodeInfo := c.ClusterServers[id]
-		c.Log.Infof("node %s is disconnected, re-establish the connection: %s", nodeInfo.Id, nodeInfo.Addr)
-		c.connectToNode(*nodeInfo)
-	})
-}
-
-func (c *Cluster) joinCluster() {
-	if !c.SelfNode.AutoJoinClusterEnable {
-		c.Log.Debugf("disabled auto join cluster, abandon sending join cluster request.")
-		return
-	}
-
-	connectedNodes := c.NetworkManager.GetConnectedNodes(c.ClusterServers)
-	for _, node := range connectedNodes {
-		client := c.NetworkManager.GetInternalClient(node.Id)
-		request := pb.JoinClusterRequest{
-			NodeId:                c.SelfNode.Id,
-			NodeAddr:              c.SelfNode.Addr,
-			AutoJoinClusterEnable: c.SelfNode.AutoJoinClusterEnable,
-			IsCandidate:           c.SelfNode.IsCandidate,
-		}
-		_, err := client.JoinCluster(context.Background(), &request)
-		if err != nil {
-			c.Log.Errorf("failed to join cluster from remote node, id: %s, addr: %s, %s", node.Id, node.Addr, err.Error())
-		}
-	}
-}
-
-func (c *Cluster) startRaftNode(dataDir string) {
+func (c *BaseCluster) startRaftNode(dataDir string) {
 	raftNode := hraft.RaftNode{}
 	raftNode.SetNetWorkManager(c.NetworkManager)
 
@@ -100,44 +51,27 @@ func (c *Cluster) startRaftNode(dataDir string) {
 	c.Log.Infof("raft node started.")
 }
 
-func (c *Cluster) monitoringLeadershipTransfer() {
-	isDown := false
-	for {
-		select {
-		case _ = <-c.Raft.LeaderCh():
-
-			addr, serverID := c.Raft.LeaderWithID()
-			c.Log.Infof("leader changed to %s:%s", serverID, addr)
-			c.UpdateLeader(string(serverID), string(addr))
-			c.notifyLeaderShipTransfer()
-
-		case _ = <-c.notifyLeaderCh:
-			addr, serverID := c.Raft.LeaderWithID()
-			if serverID == "" || addr == "" {
-				c.State = StandBy
-			} else {
-				c.UpdateLeader(string(serverID), string(addr))
-				c.notifyLeaderShipTransfer()
-			}
-			c.Log.Infof("leadership has changed from %s to %s", c.Leader.Addr, addr)
-
-		case <-c.ShutDownCh:
-			isDown = true
-			break
-		}
-		if isDown {
-			break
-		}
+func (c *BaseCluster) UpdateLeader(term int, id, addr string) {
+	if c.Leader == nil {
+		leader := NewLeader(term, id, addr)
+		c.Leader = leader
+		return
 	}
+
+	c.Leader.id = id
+	c.Leader.addr = addr
+	c.Leader.term = term
 }
 
-func (c *Cluster) notifyLeaderShipTransfer() {
+func (c *BaseCluster) notifyLeaderShipTransfer(status pb.TransferStatus) {
 	request := pb.TransferRequest{
-		NodeId:   c.Leader.Id,
-		NodeAddr: c.Leader.Addr,
+		Term:     int64(c.Leader.term),
+		NodeId:   c.Leader.id,
+		NodeAddr: c.Leader.addr,
+		Status:   status,
 	}
 	for _, node := range c.GetConnectedNodes(c.ClusterServers) {
-		client := c.NetworkManager.GetInternalClient(node.Id)
+		client := c.NetworkManager.GetInterRpcClient(node.Id)
 		_, err := client.TransferLeadership(context.Background(), &request)
 		if err != nil {
 			c.Log.Errorf("failed to notify %s:%s leader transferred, %v", node.Id, node.Addr, err)
@@ -145,7 +79,7 @@ func (c *Cluster) notifyLeaderShipTransfer() {
 	}
 }
 
-func (c *Cluster) connectOtherCandidateNodes() {
+func (c *BaseCluster) connectOtherCandidateNodes() {
 	otherNodes := c.GetOtherNodes(c.SelfNode.Id)
 	if len(otherNodes) == 0 {
 		// this rarely happens because the list of servers in cluster mode
@@ -163,14 +97,14 @@ func (c *Cluster) connectOtherCandidateNodes() {
 	for _, node := range c.GetOtherNodes(c.SelfNode.Id) {
 		remote := node
 		wg.Go(func() {
-			c.connectToNode(remote)
+			c.ConnectToNode(remote)
 		})
 	}
 	wg.Wait()
 	c.Log.Info("all the other candidate nodes are connected.")
 }
 
-func (c *Cluster) Shutdown() {
+func (c *BaseCluster) Shutdown() {
 	if c.Raft != nil {
 		future := c.Raft.Shutdown()
 		err := future.Error()
@@ -179,12 +113,12 @@ func (c *Cluster) Shutdown() {
 		}
 	}
 
-	c.NetworkManager.Close()
+	c.NetworkManager.CloseAllConn()
 	close(c.ShutDownCh)
 	time.Sleep(time.Second)
 }
 
-func (c *Cluster) connectToNode(remoteNode config.NodeInfo) {
+func (c *BaseCluster) ConnectToNode(remoteNode config.NodeInfo) {
 	retries := 1
 	var kacp = keepalive.ClientParameters{
 		// send pings every ClusterHeartbeatInterval seconds if there is no activity
@@ -233,7 +167,7 @@ func (c *Cluster) connectToNode(remoteNode config.NodeInfo) {
 }
 
 // exchange information between the two nodes in preparation for the creation of a myCluster
-func (c *Cluster) getNodeInfo(remoteNode config.NodeInfo) {
+func (c *BaseCluster) getNodeInfo(remoteNode config.NodeInfo) {
 
 	// handle the problem of cluster configuration mismatch when updating remote node
 	// if the cluster configuration does not match, it will exit directly
@@ -258,13 +192,13 @@ func (c *Cluster) getNodeInfo(remoteNode config.NodeInfo) {
 			IsCandidate:           currentNode.IsCandidate,
 			AutoJoinClusterEnable: currentNode.AutoJoinClusterEnable,
 		}
-		client := c.GetInternalClient(remoteNode.Id)
-		response, err := client.GetNodeInfo(context.Background(), &request)
+		rpcClient := c.GetInterRpcClient(remoteNode.Id)
+		remote, err := rpcClient.GetNodeInfo(context.Background(), &request)
 		if err != nil {
 			connected := c.IsConnected(remoteNode.Id)
 			if !connected {
 				c.Log.Errorf("remote node [%s][%s] is disconnected.", remoteNode.Id, remoteNode.Addr)
-				c.connectToNode(remoteNode)
+				c.ConnectToNode(remoteNode)
 				continue
 			}
 			c.Log.Errorf("failed to get node info from %s - %s, retry time: %d, . %v", remoteNode.Id, remoteNode.Addr, retries, err)
@@ -272,13 +206,23 @@ func (c *Cluster) getNodeInfo(remoteNode config.NodeInfo) {
 			continue
 		}
 
+		if remote.StartupMode == pb.StartupMode_StandAlone {
+			c.Log.Warnf("remote node [%s][%s] is in standalone mode, close the remote connection.", remoteNode.Id, remoteNode.Addr)
+			c.RemoveNode(remote.NodeId)
+			err := c.CloseConn(remote.NodeId)
+			if err != nil {
+				c.Log.Errorf("failed to close the remote connection of node [%s][%s], %v", remoteNode.Id, remoteNode.Addr, err)
+			}
+			return
+		}
+
 		remoteNode := config.NodeInfo{
-			Id:                    response.NodeId,
-			Ip:                    response.NodeIp,
-			Addr:                  response.NodeIp + ":" + strconv.Itoa(int(response.InternalPort)),
-			InternalPort:          int(response.InternalPort),
-			IsCandidate:           response.IsCandidate,
-			AutoJoinClusterEnable: response.AutoJoinClusterEnable,
+			Id:                    remote.NodeId,
+			Ip:                    remote.NodeIp,
+			Addr:                  remote.NodeIp + ":" + strconv.Itoa(int(remote.InternalPort)),
+			InternalPort:          int(remote.InternalPort),
+			IsCandidate:           remote.IsCandidate,
+			AutoJoinClusterEnable: remote.AutoJoinClusterEnable,
 		}
 
 		// update cluster node config

@@ -9,14 +9,17 @@ import (
 )
 
 type ClusterRpcService struct {
-	*cluster.Cluster
+	cluster *cluster.Cluster
+	config  config.Config
 }
 
 func (c *ClusterRpcService) SetCluster(cluster *cluster.Cluster) {
-	c.Cluster = cluster
+	c.cluster = cluster
 }
-func NewCRpcService() *ClusterRpcService {
-	return &ClusterRpcService{}
+func NewCRpcService(conf config.Config) *ClusterRpcService {
+	return &ClusterRpcService{
+		config: conf,
+	}
 }
 
 // GetNodeInfo the GRPC interface is implemented using the Node struct to facilitate updating the cluster state
@@ -29,7 +32,10 @@ func (c *ClusterRpcService) ForwardJoinClusterRequest(_ context.Context, req *pb
 		Id:          req.NodeId,
 		IsCandidate: req.IsCandidate,
 		Addr:        req.NodeAddr}
-	c.addNodeToCluster(remoteNode)
+	err := c.addNodeToCluster(remoteNode)
+	if err != nil {
+		return &emptypb.Empty{}, err
+	}
 	return &emptypb.Empty{}, nil
 }
 
@@ -38,7 +44,13 @@ func (c *ClusterRpcService) JoinCluster(_ context.Context, req *pb.JoinClusterRe
 }
 
 func (c *ClusterRpcService) TransferLeadership(_ context.Context, req *pb.TransferRequest) (*emptypb.Empty, error) {
-	c.Log.Infof("update leader to  %s, %s", req.NodeId, req.NodeAddr)
-	c.UpdateLeader(req.NodeId, req.NodeAddr)
+	c.cluster.Log.Infof("update leader to  %s, %s", req.NodeId, req.NodeAddr)
+	c.cluster.UpdateLeader(int(req.Term), req.NodeId, req.NodeAddr)
+	if req.Status == pb.TransferStatus_Transitioning {
+		c.cluster.SetState(cluster.Transitioning)
+	}
+	if req.Status == pb.TransferStatus_Finished {
+		c.cluster.SetState(cluster.Active)
+	}
 	return &emptypb.Empty{}, nil
 }

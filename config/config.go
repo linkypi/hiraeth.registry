@@ -73,6 +73,8 @@ func ParseConfig(filePath string, logger *logrus.Logger) Config {
 		NodeConfig:    nodeConfig,
 		ClusterConfig: clusterConfig,
 		LogLevel:      interConfig.LogLevel,
+		StartupMode:   interConfig.StartupMode,
+		JoinCluster:   interConfig.JoinCluster,
 	}
 	return config
 }
@@ -99,7 +101,6 @@ func buildNode(interConfig internalConfig) (NodeConfig, *NodeInfo) {
 func buildClusterConfig(selfNode *NodeInfo, interConfig internalConfig) ClusterConfig {
 	clusterConfig := ClusterConfig{
 		SelfNode:                 selfNode,
-		StartupMode:              interConfig.StartupMode,
 		ClusterHeartbeatInterval: interConfig.ClusterHeartbeatInterval,
 		ClusterQuorumCount:       interConfig.ClusterQuorumCount,
 		AutoJoinClusterEnable:    interConfig.AutoJoinClusterEnable,

@@ -31,11 +31,11 @@ func NewNode(config config.Config, logger *logrus.Logger) *Node {
 	return &Node{
 		selfNode:   config.NodeConfig.SelfNode,
 		Config:     config.NodeConfig,
-		rpcService: rpc.NewCRpcService(),
+		rpcService: rpc.NewCRpcService(config),
 		log:        logger}
 }
 
-func (n *Node) Start(clusterConfig *config.ClusterConfig) {
+func (n *Node) Start(conf config.Config) {
 
 	n.Network = network.NewNetworkManager(n.selfNode.Addr, n.log)
 
@@ -54,8 +54,8 @@ func (n *Node) Start(clusterConfig *config.ClusterConfig) {
 		return
 	}
 
-	if clusterConfig.StartupMode == config.Cluster {
-		myCluster := cluster.NewCluster(clusterConfig, n.selfNode, n.Network, n.shutDownCh, n.log)
+	if conf.StartupMode == config.Cluster {
+		myCluster := cluster.NewCluster(&conf.ClusterConfig, conf.JoinCluster, n.selfNode, n.Network, n.shutDownCh, n.log)
 		n.rpcService.SetCluster(myCluster)
 		go myCluster.Start(n.Config.DataDir)
 	}
