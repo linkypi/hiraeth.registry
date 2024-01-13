@@ -24,6 +24,8 @@ const (
 	ClusterService_ForwardJoinClusterRequest_FullMethodName = "/ClusterService/ForwardJoinClusterRequest"
 	ClusterService_JoinCluster_FullMethodName               = "/ClusterService/JoinCluster"
 	ClusterService_TransferLeadership_FullMethodName        = "/ClusterService/TransferLeadership"
+	ClusterService_PublishMetadata_FullMethodName           = "/ClusterService/PublishMetadata"
+	ClusterService_GetFollowerInfo_FullMethodName           = "/ClusterService/GetFollowerInfo"
 )
 
 // ClusterServiceClient is the client API for ClusterService service.
@@ -33,7 +35,9 @@ type ClusterServiceClient interface {
 	GetNodeInfo(ctx context.Context, in *NodeInfoRequest, opts ...grpc.CallOption) (*NodeInfoResponse, error)
 	ForwardJoinClusterRequest(ctx context.Context, in *JoinClusterRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	JoinCluster(ctx context.Context, in *JoinClusterRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	TransferLeadership(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	TransferLeadership(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*TransferResponse, error)
+	PublishMetadata(ctx context.Context, in *PublishMetadataRequest, opts ...grpc.CallOption) (*PublishMetadataResponse, error)
+	GetFollowerInfo(ctx context.Context, in *FollowerInfoRequest, opts ...grpc.CallOption) (*FollowerInfoResponse, error)
 }
 
 type clusterServiceClient struct {
@@ -71,9 +75,27 @@ func (c *clusterServiceClient) JoinCluster(ctx context.Context, in *JoinClusterR
 	return out, nil
 }
 
-func (c *clusterServiceClient) TransferLeadership(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	out := new(emptypb.Empty)
+func (c *clusterServiceClient) TransferLeadership(ctx context.Context, in *TransferRequest, opts ...grpc.CallOption) (*TransferResponse, error) {
+	out := new(TransferResponse)
 	err := c.cc.Invoke(ctx, ClusterService_TransferLeadership_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterServiceClient) PublishMetadata(ctx context.Context, in *PublishMetadataRequest, opts ...grpc.CallOption) (*PublishMetadataResponse, error) {
+	out := new(PublishMetadataResponse)
+	err := c.cc.Invoke(ctx, ClusterService_PublishMetadata_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterServiceClient) GetFollowerInfo(ctx context.Context, in *FollowerInfoRequest, opts ...grpc.CallOption) (*FollowerInfoResponse, error) {
+	out := new(FollowerInfoResponse)
+	err := c.cc.Invoke(ctx, ClusterService_GetFollowerInfo_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +109,9 @@ type ClusterServiceServer interface {
 	GetNodeInfo(context.Context, *NodeInfoRequest) (*NodeInfoResponse, error)
 	ForwardJoinClusterRequest(context.Context, *JoinClusterRequest) (*emptypb.Empty, error)
 	JoinCluster(context.Context, *JoinClusterRequest) (*emptypb.Empty, error)
-	TransferLeadership(context.Context, *TransferRequest) (*emptypb.Empty, error)
+	TransferLeadership(context.Context, *TransferRequest) (*TransferResponse, error)
+	PublishMetadata(context.Context, *PublishMetadataRequest) (*PublishMetadataResponse, error)
+	GetFollowerInfo(context.Context, *FollowerInfoRequest) (*FollowerInfoResponse, error)
 }
 
 // UnimplementedClusterServiceServer should be embedded to have forward compatible implementations.
@@ -103,8 +127,14 @@ func (UnimplementedClusterServiceServer) ForwardJoinClusterRequest(context.Conte
 func (UnimplementedClusterServiceServer) JoinCluster(context.Context, *JoinClusterRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method JoinCluster not implemented")
 }
-func (UnimplementedClusterServiceServer) TransferLeadership(context.Context, *TransferRequest) (*emptypb.Empty, error) {
+func (UnimplementedClusterServiceServer) TransferLeadership(context.Context, *TransferRequest) (*TransferResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TransferLeadership not implemented")
+}
+func (UnimplementedClusterServiceServer) PublishMetadata(context.Context, *PublishMetadataRequest) (*PublishMetadataResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PublishMetadata not implemented")
+}
+func (UnimplementedClusterServiceServer) GetFollowerInfo(context.Context, *FollowerInfoRequest) (*FollowerInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFollowerInfo not implemented")
 }
 
 // UnsafeClusterServiceServer may be embedded to opt out of forward compatibility for this service.
@@ -190,6 +220,42 @@ func _ClusterService_TransferLeadership_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ClusterService_PublishMetadata_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PublishMetadataRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterServiceServer).PublishMetadata(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterService_PublishMetadata_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterServiceServer).PublishMetadata(ctx, req.(*PublishMetadataRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClusterService_GetFollowerInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FollowerInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterServiceServer).GetFollowerInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterService_GetFollowerInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterServiceServer).GetFollowerInfo(ctx, req.(*FollowerInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ClusterService_ServiceDesc is the grpc.ServiceDesc for ClusterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -212,6 +278,14 @@ var ClusterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TransferLeadership",
 			Handler:    _ClusterService_TransferLeadership_Handler,
+		},
+		{
+			MethodName: "PublishMetadata",
+			Handler:    _ClusterService_PublishMetadata_Handler,
+		},
+		{
+			MethodName: "GetFollowerInfo",
+			Handler:    _ClusterService_GetFollowerInfo_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

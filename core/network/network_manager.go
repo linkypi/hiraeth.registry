@@ -4,6 +4,7 @@ import (
 	"github.com/linkypi/hiraeth.registry/config"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/connectivity"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,9 @@ type NetworkManager struct {
 
 	ConnectionsMtx sync.Mutex
 	Connections    map[string]*conn
+
+	// address -> nodeId
+	AddrIdMap map[string]string
 }
 
 var (
@@ -32,11 +36,12 @@ var (
 )
 
 type conn struct {
+	Addr     string
 	grpcConn *grpc.ClientConn
 	// just for raft NodeInfo communications
 	raftClient pb.RaftTransportClient
 	// just for cluster server NodeInfo communications
-	internalClient pb.ClusterServiceClient
+	InternalClient pb.ClusterServiceClient
 	mtx            sync.Mutex
 }
 
@@ -47,8 +52,20 @@ func NewNetworkManager(localAddress string, log *logrus.Logger) *NetworkManager 
 		LocalAddress: address,
 		RpcChan:      make(chan raft.RPC),
 		Connections:  map[string]*conn{},
+		AddrIdMap:    make(map[string]string),
 	}
 	return m
+}
+
+func (net *NetworkManager) GetConnectedNodeIds(clusterServers map[string]*config.NodeInfo) []string {
+	arr := make([]string, 0, 8)
+	for _, node := range clusterServers {
+		_, ok := net.Connections[node.Id]
+		if ok {
+			arr = append(arr, node.Id)
+		}
+	}
+	return arr
 }
 
 func (net *NetworkManager) GetConnectedNodes(clusterServers map[string]*config.NodeInfo) []config.NodeInfo {
@@ -66,14 +83,24 @@ func (net *NetworkManager) GetRaftClient(id string) (pb.RaftTransportClient, err
 	if !net.ExistConn(id) {
 		return nil, errors.New("connection not exist, id: " + id)
 	}
-	return net.Connections[id].raftClient, nil
+	conn := net.Connections[id]
+
+	defer func() {
+		if err := recover(); err != nil {
+			net.log.Errorf("panic when get raft client, id: %s, err: %v", id, err)
+		}
+	}()
+	if conn.raftClient == nil {
+		net.log.Warnf("raft connection to node %s is nil, rpc con: %s.", id, conn.grpcConn.Target())
+	}
+	return conn.raftClient, nil
 }
 
 func (net *NetworkManager) GetInterRpcClient(id string) pb.ClusterServiceClient {
 	if !net.ExistConn(id) {
 		return nil
 	}
-	return net.Connections[id].internalClient
+	return net.Connections[id].InternalClient
 }
 
 func (net *NetworkManager) IsConnected(id string) bool {
@@ -90,30 +117,50 @@ func (net *NetworkManager) ExistConn(id string) bool {
 	return ok
 }
 
-func (net *NetworkManager) AddConn(id string, grpcConn *grpc.ClientConn,
-	internalServClient pb.ClusterServiceClient, raftClient pb.RaftTransportClient) {
-
-	net.ConnectionsMtx.Lock()
-	c, ok := net.Connections[id]
+func (net *NetworkManager) GetConnByAddr(addr string) (*conn, error) {
+	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
+	id, ok := net.AddrIdMap[addr]
 	if !ok {
-		c = &conn{}
-		c.mtx.Lock()
-		net.Connections[id] = c
+		return &conn{}, errors.New("connection not exist, addr: " + addr)
 	}
-	net.ConnectionsMtx.Unlock()
-	if ok {
-		c.mtx.Lock()
+	con, ok := net.Connections[id]
+	if !ok {
+		return &conn{}, errors.New("connection not exist, addr: " + addr)
 	}
-	defer c.mtx.Unlock()
-	if grpcConn != nil {
-		c.grpcConn = grpcConn
+	return con, nil
+}
+
+func (net *NetworkManager) AddConn(id, addr string, grpcConn *grpc.ClientConn,
+	internalServClient pb.ClusterServiceClient, raftClient pb.RaftTransportClient) {
+	net.ConnectionsMtx.Lock()
+	defer net.ConnectionsMtx.Unlock()
+
+	net.AddrIdMap[addr] = id
+
+	con, ok := net.Connections[id]
+	if !ok {
+		con = &conn{
+			Addr:           addr,
+			raftClient:     raftClient,
+			grpcConn:       grpcConn,
+			InternalClient: internalServClient,
+		}
+		con.mtx.Lock()
+		defer con.mtx.Unlock()
+		net.Connections[id] = con
+		net.log.Infof("connection to node %s is established.", id)
+		return
 	}
-	if internalServClient != nil {
-		c.internalClient = internalServClient
-	}
-	if raftClient != nil {
-		c.raftClient = raftClient
-	}
+
+	con.mtx.Lock()
+	defer con.mtx.Unlock()
+
+	con.Addr = addr
+	con.grpcConn = grpcConn
+	con.raftClient = raftClient
+	con.InternalClient = internalServClient
+	net.log.Infof("update connection to node %s.", id)
+
 }
 
 func (net *NetworkManager) CloseAllConn() error {
@@ -129,6 +176,7 @@ func (net *NetworkManager) CloseAllConn() error {
 		if closeErr != nil {
 			err = multierror.Append(err, closeErr)
 		}
+		delete(net.AddrIdMap, conn.Addr)
 	}
 
 	if err != errCloseErr {
@@ -152,8 +200,10 @@ func (net *NetworkManager) CloseConn(nodeId string) error {
 		if closeErr != nil {
 			return closeErr
 		}
+		delete(net.AddrIdMap, conn.Addr)
 	}
 	delete(net.Connections, nodeId)
+
 	return nil
 }
 
@@ -166,6 +216,9 @@ func (net *NetworkManager) CheckConnClosed(shutDownCh chan struct{}, reconnect f
 		}
 
 		for id, con := range net.Connections {
+			if con.grpcConn == nil {
+				continue
+			}
 			state := con.grpcConn.GetState()
 			net.log.Debugf("Connection state for %s: %s", id, state.String())
 
@@ -180,16 +233,17 @@ func (net *NetworkManager) CheckConnClosed(shutDownCh chan struct{}, reconnect f
 					continue
 				}
 				con.raftClient = nil
-				con.internalClient = nil
+				con.InternalClient = nil
 				con.mtx.Unlock()
 				delete(net.Connections, id)
+				delete(net.AddrIdMap, con.Addr)
 				net.ConnectionsMtx.Unlock()
 
 				// Re-establish the connection
 				go reconnect(id)
 			}
 
-			time.Sleep(2 * time.Second)
+			time.Sleep(5 * time.Second)
 		}
 	}
 }

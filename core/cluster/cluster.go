@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/linkypi/hiraeth.registry/config"
 	"github.com/linkypi/hiraeth.registry/core/network"
+	"github.com/linkypi/hiraeth.registry/core/slot"
 	pb "github.com/linkypi/hiraeth.registry/proto"
 	"github.com/sirupsen/logrus"
 	"strconv"
@@ -17,18 +18,28 @@ type Cluster struct {
 	transferMtx sync.Mutex
 }
 
-func NewCluster(clusterConfig *config.ClusterConfig, joinCluster bool, selfNode *config.NodeInfo,
+const (
+	MetaDataFileName = "/metadata.json"
+	TermKey          = "term"
+)
+
+func NewCluster(conf *config.Config, selfNode *config.NodeInfo,
 	net *network.NetworkManager, shutDownCh chan struct{}, log *logrus.Logger) *Cluster {
+
+	slotManager := slot.NewManager(log, selfNode.Id, conf.NodeConfig.DataDir, conf.ClusterConfig.NumberOfReplicas)
 	cluster := Cluster{
 		BaseCluster: &BaseCluster{
-			Log:            log,
-			joinCluster:    joinCluster,
-			State:          Initializing,
-			Config:         clusterConfig,
-			ShutDownCh:     shutDownCh,
-			SelfNode:       selfNode,
-			notifyLeaderCh: make(chan bool, 10),
-			ClusterServers: clusterConfig.ClusterServers,
+			Log:                  log,
+			joinCluster:          conf.JoinCluster,
+			State:                Initializing,
+			Config:               &conf.ClusterConfig,
+			nodeConfig:           &conf.NodeConfig,
+			ShutDownCh:           shutDownCh,
+			SelfNode:             selfNode,
+			notifyLeaderCh:       make(chan bool, 10),
+			ClusterExpectedNodes: conf.ClusterConfig.ClusterServers,
+			ClusterActualNodes:   conf.ClusterConfig.ClusterServers,
+			slotManager:          slotManager,
 		},
 	}
 	cluster.setNet(net)
@@ -41,12 +52,12 @@ func (c *Cluster) Start(dataDir string) {
 
 	// wait for the quorum nodes to be connected
 	for len(c.Connections)+1 < c.Config.ClusterQuorumCount {
-		time.Sleep(200 * time.Millisecond)
 		select {
 		case <-c.ShutDownCh:
 			c.Shutdown()
 			return
 		default:
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
 
@@ -56,7 +67,7 @@ func (c *Cluster) Start(dataDir string) {
 	go c.monitoringLeadershipTransfer()
 
 	go c.CheckConnClosed(c.ShutDownCh, func(id string) {
-		nodeInfo := c.ClusterServers[id]
+		nodeInfo := c.ClusterActualNodes[id]
 		c.Log.Infof("node %s is disconnected, re-establish the connection: %s", nodeInfo.Id, nodeInfo.Addr)
 		c.ConnectToNode(*nodeInfo)
 	})
@@ -66,65 +77,68 @@ func (c *Cluster) Start(dataDir string) {
 	}
 }
 
+// 区分当前健康集群的节点列表以及配置中期望的集群节点列表
+func (c *Cluster) checkClusterState() {
+
+}
+
 func (c *Cluster) monitoringLeadershipTransfer() {
-	isDown := false
 	for {
 		select {
-		// Only the leader node will receive the message
 		case _ = <-c.Raft.LeaderCh():
 			go c.transferLeaderShip()
 
-		// Only the leader node will receive the message
 		// Multiple guarantees to obtain leadership transfer notices
 		case _ = <-c.notifyLeaderCh:
 			go c.transferLeaderShip()
 
 		case <-c.ShutDownCh:
-			isDown = true
-			break
-		}
-		if isDown {
-			break
+			return
 		}
 	}
 }
 
 func (c *Cluster) transferLeaderShip() {
 
-	oldLeader := c.Leader
+	c.transferMtx.Lock()
+	defer c.transferMtx.Unlock()
 
-	addr, nodeId := c.Raft.LeaderWithID()
+	oldLeader := c.BaseCluster.Leader
+
+	leaderAddr, leaderId := c.Raft.LeaderWithID()
 	stats := c.Raft.Stats()
-	term, _ := strconv.Atoi(stats["term"])
+	term, _ := strconv.Atoi(stats[TermKey])
 
 	//  If the leader is not changed, it will not be executed
-	if oldLeader != nil && oldLeader.id == string(nodeId) && oldLeader.term == term {
+	if oldLeader != nil && oldLeader.Id == string(leaderId) && oldLeader.Term == term {
+		// 很有可能是新节点加入集群,此时就需要读取metadata.json中的数据来判断前后的follower数量是否一致
+		// 若follower数量不一致则说明是新节点加入,需要重新调整数据分片
 		return
 	}
 
-	c.transferMtx.Lock()
-	defer c.transferMtx.Unlock()
+	// First of all, we need to confirm which followers are led by the leader and whether the follower status is normal
+	future := c.Raft.VerifyLeader()
+	if future.Error() != nil {
+		c.Log.Errorf("failed to transfer leadership: %s", future.Error())
+		return
+	}
+
 	// The first thing you need to do is set the cluster state to StandBy
 	// In this case, the cluster only receives read requests and cannot process write requests
 	c.SetState(Transitioning)
 
 	jsonStr, _ := json.Marshal(stats)
-	c.Log.Debugf("transfer leadership to %s, raft stats : %s", nodeId, jsonStr)
+	c.Log.Debugf("[leader] transfer leadership to %s, raft stats : %s", leaderId, jsonStr)
 
-	c.UpdateLeader(term, string(nodeId), string(addr))
-	c.Log.Infof("transfer leadership to %s:%s", nodeId, addr)
+	c.UpdateLeader(term, string(leaderId), string(leaderAddr))
 
-	// Notify the follower node that the leader has been transferred,
-	// and the cluster no longer receives write requests and only processes read requests
-	// After the data migration is complete, the cluster is back to Active
-	go c.notifyLeaderShipTransfer(pb.TransferStatus_Transitioning)
-
-	// Initialize the hash slot and shard the data
-	// Or resize the data sharding
+	raftConf := c.Raft.GetConfiguration().Configuration()
+	nodes := c.getNodesByRaftServers(raftConf.Servers)
+	c.Leader.buildCluster(nodes)
 }
 
 func (c *Cluster) joinToCluster() {
-	connectedNodes := c.NetworkManager.GetConnectedNodes(c.ClusterServers)
+	connectedNodes := c.NetworkManager.GetConnectedNodes(c.ClusterExpectedNodes)
 	for _, node := range connectedNodes {
 		rpcClient := c.NetworkManager.GetInterRpcClient(node.Id)
 		request := pb.JoinClusterRequest{

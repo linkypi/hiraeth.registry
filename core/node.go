@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"github.com/linkypi/hiraeth.registry/config"
 	cluster "github.com/linkypi/hiraeth.registry/core/cluster"
 	"github.com/linkypi/hiraeth.registry/core/cluster/rpc"
@@ -38,7 +39,14 @@ func NewNode(config config.Config, logger *logrus.Logger) *Node {
 func (n *Node) Start(conf config.Config) {
 
 	n.Network = network.NewNetworkManager(n.selfNode.Addr, n.log)
-
+	defer func() {
+		if err := recover(); err != nil {
+			marshal, _ := json.Marshal(conf)
+			n.log.Debugf("faile to start node: %v, config: %s", err, string(marshal))
+			n.log.Errorf("faile to start node: %v", err)
+			n.Shutdown()
+		}
+	}()
 	// since grpc will enter a loop after starting
 	// we need to use a channel to notify grpcServer
 	// has assigned if it has been started
@@ -55,7 +63,7 @@ func (n *Node) Start(conf config.Config) {
 	}
 
 	if conf.StartupMode == config.Cluster {
-		myCluster := cluster.NewCluster(&conf.ClusterConfig, conf.JoinCluster, n.selfNode, n.Network, n.shutDownCh, n.log)
+		myCluster := cluster.NewCluster(&conf, n.selfNode, n.Network, n.shutDownCh, n.log)
 		n.rpcService.SetCluster(myCluster)
 		go myCluster.Start(n.Config.DataDir)
 	}

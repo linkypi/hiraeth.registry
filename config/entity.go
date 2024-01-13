@@ -1,6 +1,9 @@
 package config
 
-import "github.com/sirupsen/logrus"
+import (
+	"encoding/json"
+	"github.com/sirupsen/logrus"
+)
 
 // server node Info
 type NodeInfo struct {
@@ -13,6 +16,20 @@ type NodeInfo struct {
 	IsCandidate           bool
 	AutoJoinClusterEnable bool
 }
+
+func (s NodeInfo) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"id":                    s.Id,
+		"ip":                    s.Ip,
+		"internalPort":          s.InternalPort,
+		"addr":                  s.Addr,
+		"externalHttpPort":      s.externalHttpPort,
+		"externalTcpPort":       s.externalTcpPort,
+		"IsCandidate":           s.IsCandidate,
+		"AutoJoinClusterEnable": s.AutoJoinClusterEnable,
+	})
+}
+
 type kv struct {
 	key string
 	val any
@@ -56,6 +73,10 @@ const (
 	// LogLevel specify the log level, with the following values: debug, info, warn, error, fatal.
 	// The default log level is info
 	LogLevel = "log.level"
+	// NumberOfReplicas To ensure that data is not lost, each shard will store several replica shards,
+	// and replica shards can only be stored on other nodes. If the cluster has N nodes, the replica shards
+	// can only be set to N-1 at most, but at least one is guaranteed
+	NumberOfReplicas = "number.of.replicas"
 )
 
 type Config struct {
@@ -73,6 +94,14 @@ type NodeConfig struct {
 	HeartbeatInterval int
 }
 
+func (c NodeConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"dataDir":           c.DataDir,
+		"logDir":            c.LogDir,
+		"heartbeatInterval": c.HeartbeatInterval,
+	})
+}
+
 type StartUpMode int
 
 const (
@@ -84,6 +113,7 @@ type ClusterConfig struct {
 	SelfNode            *NodeInfo
 	OtherCandidateNodes []NodeInfo
 
+	NumberOfReplicas         int
 	ClusterServers           map[string]*NodeInfo
 	ClusterHeartbeatInterval int
 	ClusterQuorumCount       int
@@ -91,6 +121,18 @@ type ClusterConfig struct {
 	RaftHeartbeatTimeout     int
 	AutoJoinClusterEnable    bool
 	LogLevel                 logrus.Level
+}
+
+func (c ClusterConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"numberOfReplicas":         c.NumberOfReplicas,
+		"clusterHeartbeatInterval": c.ClusterHeartbeatInterval,
+		"clusterQuorumCount":       c.ClusterQuorumCount,
+		"raftElectionTimeout":      c.RaftElectionTimeout,
+		"raftHeartbeatTimeout":     c.RaftHeartbeatTimeout,
+		"autoJoinClusterEnable":    c.AutoJoinClusterEnable,
+		"logLevel":                 c.LogLevel,
+	})
 }
 
 // Use reflection to set properties, all of which must be public
@@ -101,6 +143,7 @@ type internalConfig struct {
 	ClientHttpPort   int
 	ClientTcpPort    int
 
+	NumberOfReplicas         int
 	JoinCluster              bool
 	StartupMode              StartUpMode
 	IsCandidate              bool
@@ -138,7 +181,19 @@ var LogLevelProp = property{
 	},
 }
 
+var NumberOfReplicasProp = property{
+	dataType:     "int",
+	propName:     "NumberOfReplicas",
+	key:          NumberOfReplicas,
+	require:      false,
+	defaultVal:   1,
+	parseHandler: validateNumber,
+}
+
 func init() {
+	properties = append(properties, StartupModeProp)
+	properties = append(properties, LogLevelProp)
+	properties = append(properties, NumberOfReplicasProp)
 	properties = append(properties, property{
 		dataType:     "string",
 		propName:     "NodeId",
@@ -211,8 +266,6 @@ func init() {
 		require:    false,
 		defaultVal: 1000,
 	})
-	properties = append(properties, StartupModeProp)
-	properties = append(properties, LogLevelProp)
 	properties = append(properties, property{dataType: "int", propName: "ClientHttpPort", key: ClientHttpPort, require: false, defaultVal: 5042})
 	properties = append(properties, property{dataType: "int", propName: "ClientTcpPort", key: ClientTcpPort, require: false, defaultVal: 5386})
 	properties = append(properties, property{dataType: "string", propName: "DataDir", key: DataDir, require: false, defaultVal: "./data"})

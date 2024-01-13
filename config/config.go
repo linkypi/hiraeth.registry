@@ -101,6 +101,7 @@ func buildNode(interConfig internalConfig) (NodeConfig, *NodeInfo) {
 func buildClusterConfig(selfNode *NodeInfo, interConfig internalConfig) ClusterConfig {
 	clusterConfig := ClusterConfig{
 		SelfNode:                 selfNode,
+		NumberOfReplicas:         interConfig.NumberOfReplicas,
 		ClusterHeartbeatInterval: interConfig.ClusterHeartbeatInterval,
 		ClusterQuorumCount:       interConfig.ClusterQuorumCount,
 		AutoJoinClusterEnable:    interConfig.AutoJoinClusterEnable,
@@ -181,8 +182,8 @@ func setConfigProperty(elems reflect.Value, prop property, val string) {
 			strVal := val
 			if val == "" {
 				log.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
-				var result int64 = int64(prop.defaultVal.(int))
-				field.SetInt(result)
+				ret := reflect.ValueOf(prop.defaultVal)
+				field.Set(ret.Convert(field.Type()))
 				return
 			}
 			if prop.parseHandler != nil {
@@ -231,3 +232,28 @@ func setConfigProperty(elems reflect.Value, prop property, val string) {
 		}
 	}
 }
+
+//func setDefaultVal(filed reflect.Value, dataType string, val any) {
+//	t := reflect.TypeOf(val)
+//	if t.Kind() == reflect.String {
+//		if dataType == "int" {
+//			intVal, err := strconv.Atoi(val.(string))
+//			if err != nil {
+//				log.Errorf("property %s default value is invalid: %s", prop.key, val)
+//				os.Exit(1)
+//			}
+//			filed.SetInt(intVal)
+//		}
+//		filed.SetString(val.(string))
+//		return
+//	}
+//	if t.Kind() == reflect.Ptr {
+//		t = t.Elem()
+//	}
+//	switch t.Kind() {
+//	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+//		val = int64(0)
+//	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+//		val = uint64(0)
+//	}
+//}

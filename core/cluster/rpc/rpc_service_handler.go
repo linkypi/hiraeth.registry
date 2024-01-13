@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/linkypi/hiraeth.registry/config"
+	"github.com/linkypi/hiraeth.registry/core/cluster"
 	pb "github.com/linkypi/hiraeth.registry/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"strconv"
@@ -66,26 +67,26 @@ func (c *ClusterRpcService) replyNodeInfo(req *pb.NodeInfoRequest) (*pb.NodeInfo
 }
 
 func (c *ClusterRpcService) addNodeToCluster(remoteNode config.NodeInfo) error {
-	cluster := c.cluster
-	if cluster.Raft == nil {
+	cls := c.cluster
+	if cls.Raft == nil {
 		// this is rarely the case, unless a stand-alone service starts
-		cluster.Log.Errorf("[cluster] Raft is not initialized, can't add node to cluster, node id %s, addr : %s", remoteNode.Id, remoteNode.Addr)
+		cls.Log.Errorf("[cluster] Raft is not initialized, can't add node to cluster, node id %s, addr : %s", remoteNode.Id, remoteNode.Addr)
 		return errors.New("raft is not initialized, can't add node to cluster")
 	}
-	addr, leaderId := cluster.Raft.LeaderWithID()
+	addr, leaderId := cls.Raft.LeaderWithID()
 	if addr == "" || leaderId == "" {
-		cluster.Log.Errorf("[cluster] leader not found, can't add node to cluster, "+
-			"current node state: %s, cluster state: %s", cluster.Raft.State().String(), cluster.State.String())
+		cls.Log.Errorf("[cluster] leader not found, can't add node to cluster, "+
+			"current node state: %s, cluster state: %s", cls.Raft.State().String(), cls.State.String())
 		return errors.New("leader not found, can't add node to cluster")
 	}
 
 	// only the leader node has the permission to add nodes, otherwise the addition fails
-	if cluster.IsLeader() {
-		return cluster.Leader.AddNewNode(&remoteNode)
+	if cls.IsLeader() {
+		return cls.Leader.AddNewNode(&remoteNode)
 	}
 	// forward the request to the leader node for addition
-	cluster.Log.Infof("[cluster] forwarding the request to the leader node for addition, node id: %s, addr: %s", leaderId, addr)
-	rpcClient := cluster.GetInterRpcClient(string(leaderId))
+	cls.Log.Infof("[cluster] forwarding the request to the leader node for addition, node id: %s, addr: %s", leaderId, addr)
+	rpcClient := cls.GetInterRpcClient(string(leaderId))
 	request := &pb.JoinClusterRequest{
 		NodeId:                remoteNode.Id,
 		NodeAddr:              remoteNode.Addr,
@@ -94,12 +95,63 @@ func (c *ClusterRpcService) addNodeToCluster(remoteNode config.NodeInfo) error {
 	}
 	_, err := rpcClient.ForwardJoinClusterRequest(context.Background(), request)
 	if err != nil {
-		cluster.Log.Error("[cluster] failed to forward the request to the leader node for addition,"+
+		cls.Log.Error("[cluster] failed to forward the request to the leader node for addition,"+
 			" node id: %s, addr: %s, error: %s", leaderId, addr, err.Error())
 		return err
 	}
-	cluster.Log.Infof("added node to cluster success: %s, %s", remoteNode.Id, remoteNode.Addr)
+	cls.Log.Infof("added node to cluster success: %s, %s", remoteNode.Id, remoteNode.Addr)
 	return nil
+}
+
+func (c *ClusterRpcService) replyFollowerInfo(req *pb.FollowerInfoRequest) (response *pb.FollowerInfoResponse, err error) {
+	return &pb.FollowerInfoResponse{
+		Term:         int64(c.cluster.Leader.Term),
+		LeaderId:     c.cluster.Leader.Id,
+		ClusterState: c.cluster.State.String(),
+		NodeId:       c.cluster.SelfNode.Id,
+		NodeAddr:     c.cluster.SelfNode.Addr,
+	}, nil
+}
+func (c *ClusterRpcService) handleLeadershipTransfer(req *pb.TransferRequest) (*pb.TransferResponse, error) {
+	if req.Status == pb.TransferStatus_Transitioning && c.cluster.State > cluster.Transitioning {
+		c.cluster.Log.Errorf("[follower] failed to transfer leadership to [%s] status, the cluster state not match: %s, "+
+			"shoule be %s", req.Status.String(), c.cluster.State.String(), cluster.Active.String())
+		response := pb.TransferResponse{ErrorType: pb.ErrorType_ClusterStateNotMatch, ClusterState: c.cluster.State.String()}
+		return &response, nil
+	}
+	if req.Status == pb.TransferStatus_Completed && c.cluster.State > cluster.Transitioning {
+		c.cluster.Log.Errorf("[follower] failed to transfer leadership to [%s] status, the cluster state not match: %s, "+
+			"shoule be %s", req.Status.String(), c.cluster.State.String(), cluster.Transitioning.String())
+		return &pb.TransferResponse{ErrorType: pb.ErrorType_ClusterStateNotMatch, ClusterState: c.cluster.State.String()}, nil
+	}
+	if c.cluster.Leader != nil && req.LeaderId != c.cluster.Leader.Id {
+		c.cluster.Log.Errorf("[follower] failed to transfer leadership, leader id not match, "+
+			"remote leader id: %s, current leader id: %s", req.LeaderId, c.cluster.Leader.Id)
+		return &pb.TransferResponse{ErrorType: pb.ErrorType_LeaderIdNotMatch, LeaderId: c.cluster.Leader.Id}, nil
+	}
+	if c.cluster.Leader != nil && int(req.Term) != c.cluster.Leader.Term {
+		c.cluster.Log.Errorf("[follower] failed to transfer leadership, term not match, "+
+			"remote term: %d, current leader term: %d", req.Term, c.cluster.Leader.Term)
+		return &pb.TransferResponse{ErrorType: pb.ErrorType_TermNotMatch, Term: int64(c.cluster.Leader.Term)}, nil
+	}
+
+	defer func() {
+		if e := recover(); e != nil {
+			c.cluster.Log.Errorf("transfer leadership to %s panic: %v", req.Status.String(), e)
+		}
+	}()
+	c.cluster.Log.Infof("[follower] update leader to  [id:%s][term:%d][%s]", req.LeaderId, req.Term, req.Addr)
+	c.cluster.UpdateLeader(int(req.Term), req.LeaderId, req.Addr)
+
+	if req.Status == pb.TransferStatus_Transitioning {
+		c.cluster.SetState(cluster.Transitioning)
+		c.cluster.Log.Infof("[follower] the cluster is unhealth, pause receiving client write requests")
+	}
+	if req.Status == pb.TransferStatus_Completed {
+		c.cluster.SetState(cluster.Active)
+		c.cluster.Log.Infof("[follower] the cluster is healthy, start receiving client requests")
+	}
+	return &pb.TransferResponse{ErrorType: pb.ErrorType_None}, nil
 }
 
 func (c *ClusterRpcService) joinNodeToCluster(req *pb.JoinClusterRequest) (*emptypb.Empty, error) {
