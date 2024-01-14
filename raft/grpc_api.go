@@ -2,7 +2,7 @@ package raft
 
 import (
 	"context"
-	core "github.com/linkypi/hiraeth.registry/core/network"
+	core "github.com/linkypi/hiraeth.registry/network"
 	"io"
 
 	"github.com/hashicorp/raft"
@@ -12,7 +12,7 @@ import (
 // These are requests incoming over gRPC that we need to relay to the Raft engine.
 
 type grpcAPI struct {
-	net *core.NetworkManager
+	net *core.Manager
 
 	// "Unsafe" to ensure compilation fails if new methods are added but not implemented
 	pb.UnsafeRaftTransportServer

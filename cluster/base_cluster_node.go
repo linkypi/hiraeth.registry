@@ -6,8 +6,8 @@ import (
 	"errors"
 	"github.com/hashicorp/raft"
 	"github.com/linkypi/hiraeth.registry/config"
-	hraft "github.com/linkypi/hiraeth.registry/core/raft"
 	pb "github.com/linkypi/hiraeth.registry/proto"
+	raft2 "github.com/linkypi/hiraeth.registry/raft"
 	"github.com/linkypi/hiraeth.registry/util"
 	"github.com/sourcegraph/conc"
 	"google.golang.org/grpc"
@@ -18,11 +18,11 @@ import (
 )
 
 func (b *BaseCluster) startRaftNode(dataDir string) {
-	raftNode := hraft.RaftNode{}
-	raftNode.SetNetWorkManager(b.NetworkManager)
+	raftNode := raft2.RaftNode{}
+	raftNode.SetNetWorkManager(b.Manager)
 
 	selfNode := b.SelfNode
-	propFsm := &hraft.PropFsm{}
+	propFsm := &raft2.PropFsm{}
 
 	// The nodes that come in here should be the nodes that
 	// have been connected and satisfy the election quorum number
@@ -44,7 +44,7 @@ func (b *BaseCluster) startRaftNode(dataDir string) {
 		peers = append(peers, server)
 	}
 
-	raftFsm, err := raftNode.Start(selfNode.Id, dataDir, peers, *b.Config, b.notifyLeaderCh, propFsm)
+	raftFsm, err := raftNode.Start(selfNode.Id, dataDir, peers, *b.Config, b.notifyCh, propFsm)
 	if err != nil {
 		b.Log.Errorf("failed to start raft node: %v", err.Error())
 		b.Shutdown()
@@ -102,7 +102,7 @@ func (b *BaseCluster) verifyAllFollowers() (int, []config.NodeInfo, int) {
 }
 
 func (b *BaseCluster) verifyFollower(addr string) bool {
-	con, err := b.NetworkManager.GetConnByAddr(addr)
+	con, err := b.Manager.GetConnByAddr(addr)
 	if err != nil {
 		b.Log.Warnf("failed to verify follower, %s", addr)
 		return false
@@ -143,7 +143,7 @@ func (b *BaseCluster) notifyLeaderShipTransferStatus(node config.NodeInfo, statu
 	}
 
 	err := util.WaitUntilExecSuccess(time.Second*3, b.ShutDownCh, func(...any) error {
-		rpcClient := b.NetworkManager.GetInterRpcClient(node.Id)
+		rpcClient := b.Manager.GetInterRpcClient(node.Id)
 		if rpcClient == nil {
 			b.Log.Warnf("failed to notify leadership transfer to [%s], connection not ready: %s", status.String(), node.Id)
 			return errors.New("failed to get rpc client")
@@ -211,7 +211,7 @@ func (b *BaseCluster) publishMetaData(node config.NodeInfo, metaData MetaData) b
 		MetaData: string(jsonBytes),
 	}
 
-	client := b.NetworkManager.GetInterRpcClient(node.Id)
+	client := b.Manager.GetInterRpcClient(node.Id)
 	err = util.WaitUntilExecSuccess(time.Second*3, b.ShutDownCh, func(...any) error {
 		resp, err := client.PublishMetadata(context.Background(), &request)
 		if resp.ErrorType == pb.ErrorType_ClusterStateNotMatch {
@@ -231,7 +231,7 @@ func (b *BaseCluster) publishMetaData(node config.NodeInfo, metaData MetaData) b
 			time.Sleep(200 * time.Millisecond)
 			return err
 		}
-		b.Log.Infof("publish metadata to %s:%s successfully", node.Id, node.Addr)
+		b.Log.Infof("publish metadata to %s:%s success", node.Id, node.Addr)
 		return nil
 	})
 
@@ -276,7 +276,7 @@ func (b *BaseCluster) Shutdown() {
 		}
 	}
 
-	b.NetworkManager.CloseAllConn()
+	b.Manager.CloseAllConn()
 	close(b.ShutDownCh)
 	time.Sleep(time.Second)
 }
@@ -397,6 +397,10 @@ func (b *BaseCluster) getRemoteNodeInfo(remoteNode config.NodeInfo) {
 }
 
 func (b *BaseCluster) ApplyClusterMetaData(err error, req *pb.PublishMetadataRequest) error {
+
+	b.metaDataMtx.Lock()
+	defer b.metaDataMtx.Unlock()
+
 	var metaData MetaData
 	err = json.Unmarshal([]byte(req.MetaData), &metaData)
 	if err != nil {
@@ -404,7 +408,7 @@ func (b *BaseCluster) ApplyClusterMetaData(err error, req *pb.PublishMetadataReq
 		return errors.New("unmarshal metadata failed")
 	}
 
-	b.Leader.removeInvalidServerInCluster(metaData.ActualNodes)
+	b.clusterId = metaData.ClusterId
 
 	// update cluster node config
 	nodesWithPtr := b.CopyClusterNodesWithPtr(metaData.ActualNodeMap)

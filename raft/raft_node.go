@@ -5,7 +5,7 @@ import (
 	"github.com/hashicorp/raft"
 	boltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/linkypi/hiraeth.registry/config"
-	core "github.com/linkypi/hiraeth.registry/core/network"
+	core "github.com/linkypi/hiraeth.registry/network"
 	pb "github.com/linkypi/hiraeth.registry/proto"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -14,11 +14,11 @@ import (
 )
 
 type RaftNode struct {
-	net *core.NetworkManager
+	net *core.Manager
 	log logrus.Logger
 }
 
-func (rn *RaftNode) SetNetWorkManager(manager *core.NetworkManager) {
+func (rn *RaftNode) SetNetWorkManager(manager *core.Manager) {
 	rn.net = manager
 }
 
@@ -27,7 +27,7 @@ func (rn *RaftNode) transport() raft.Transport {
 	return raftAPI{rn.net}
 }
 
-func RegisterRaftTransportService(grpcServer *grpc.Server, net *core.NetworkManager) {
+func RegisterRaftTransportService(grpcServer *grpc.Server, net *core.Manager) {
 	pb.RegisterRaftTransportServer(grpcServer, grpcAPI{net: net})
 }
 

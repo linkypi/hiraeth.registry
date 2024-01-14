@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"github.com/linkypi/hiraeth.registry/config"
-	"github.com/linkypi/hiraeth.registry/core"
 )
 
 var (
@@ -36,6 +35,6 @@ func main() {
 
 	initLogger(conf.NodeConfig.LogDir, conf.LogLevel)
 
-	node := core.NewNode(conf, log)
+	node := NewNode(conf, log)
 	node.Start(conf)
 }

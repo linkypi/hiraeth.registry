@@ -51,11 +51,12 @@ func (t LogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	id := GoID()
 	if entry.HasCaller() {
 		// customize the file path
-		funcVal := entry.Caller.Function
-		fileVal := fmt.Sprintf("%s:%d", path.Base(entry.Caller.File), entry.Caller.Line)
+		//funcName := entry.Caller.Function
+		filePath := fmt.Sprintf("%s:%d", path.Base(entry.Caller.File), entry.Caller.Line)
 		// customize the output format
-		fmt.Fprintf(buffer, "[%s] \033[%dm[%s]\033[0m %s [%d] %s %s \n", timestamp,
-			levelColor, entry.Level, fileVal, id, funcVal, entry.Message)
+		fmt.Fprintf(buffer, "[%s] \033[%dm[%s]\033[0m %s [%d] %s \n", timestamp,
+			levelColor, entry.Level, filePath, id, entry.Message)
+
 	} else {
 		fmt.Fprintf(buffer, "[%s] \033[%dm[%s]\033[0m %s \n",
 			timestamp, levelColor, entry.Level, entry.Message)

@@ -2,7 +2,7 @@ package raft
 
 import (
 	"context"
-	core "github.com/linkypi/hiraeth.registry/core/network"
+	core "github.com/linkypi/hiraeth.registry/network"
 	"io"
 	"sync"
 	"time"
@@ -14,7 +14,7 @@ import (
 // These are calls from the Raft engine that we need to send out over gRPC.
 
 type raftAPI struct {
-	net *core.NetworkManager
+	net *core.Manager
 }
 
 // Consumer returns a channel that can be used to consume and respond to RPC requests.

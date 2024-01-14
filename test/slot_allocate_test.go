@@ -3,7 +3,7 @@ package test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/linkypi/hiraeth.registry/core/slot"
+	"github.com/linkypi/hiraeth.registry/slot"
 	"strconv"
 	"testing"
 )

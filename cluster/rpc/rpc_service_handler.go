@@ -3,8 +3,9 @@ package rpc
 import (
 	"context"
 	"errors"
+	"fmt"
+	"github.com/linkypi/hiraeth.registry/cluster"
 	"github.com/linkypi/hiraeth.registry/config"
-	"github.com/linkypi/hiraeth.registry/core/cluster"
 	pb "github.com/linkypi/hiraeth.registry/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"strconv"
@@ -103,7 +104,7 @@ func (c *ClusterRpcService) addNodeToCluster(remoteNode config.NodeInfo) error {
 	return nil
 }
 
-func (c *ClusterRpcService) replyFollowerInfo(req *pb.FollowerInfoRequest) (response *pb.FollowerInfoResponse, err error) {
+func (c *ClusterRpcService) replyFollowerInfo(*pb.FollowerInfoRequest) (response *pb.FollowerInfoResponse, err error) {
 	return &pb.FollowerInfoResponse{
 		Term:         int64(c.cluster.Leader.Term),
 		LeaderId:     c.cluster.Leader.Id,
@@ -112,6 +113,7 @@ func (c *ClusterRpcService) replyFollowerInfo(req *pb.FollowerInfoRequest) (resp
 		NodeAddr:     c.cluster.SelfNode.Addr,
 	}, nil
 }
+
 func (c *ClusterRpcService) handleLeadershipTransfer(req *pb.TransferRequest) (*pb.TransferResponse, error) {
 	if req.Status == pb.TransferStatus_Transitioning && c.cluster.State > cluster.Transitioning {
 		c.cluster.Log.Errorf("[follower] failed to transfer leadership to [%s] status, the cluster state not match: %s, "+
@@ -124,15 +126,17 @@ func (c *ClusterRpcService) handleLeadershipTransfer(req *pb.TransferRequest) (*
 			"shoule be %s", req.Status.String(), c.cluster.State.String(), cluster.Transitioning.String())
 		return &pb.TransferResponse{ErrorType: pb.ErrorType_ClusterStateNotMatch, ClusterState: c.cluster.State.String()}, nil
 	}
-	if c.cluster.Leader != nil && req.LeaderId != c.cluster.Leader.Id {
+
+	leaderId, _, term := c.cluster.GetLeaderInfoFromRaft()
+	if req.LeaderId != leaderId {
 		c.cluster.Log.Errorf("[follower] failed to transfer leadership, leader id not match, "+
-			"remote leader id: %s, current leader id: %s", req.LeaderId, c.cluster.Leader.Id)
-		return &pb.TransferResponse{ErrorType: pb.ErrorType_LeaderIdNotMatch, LeaderId: c.cluster.Leader.Id}, nil
+			"remote leader id: %s, current leader id: %s", req.LeaderId, leaderId)
+		return &pb.TransferResponse{ErrorType: pb.ErrorType_LeaderIdNotMatch, LeaderId: leaderId}, nil
 	}
-	if c.cluster.Leader != nil && int(req.Term) != c.cluster.Leader.Term {
+	if int(req.Term) != term {
 		c.cluster.Log.Errorf("[follower] failed to transfer leadership, term not match, "+
 			"remote term: %d, current leader term: %d", req.Term, c.cluster.Leader.Term)
-		return &pb.TransferResponse{ErrorType: pb.ErrorType_TermNotMatch, Term: int64(c.cluster.Leader.Term)}, nil
+		return &pb.TransferResponse{ErrorType: pb.ErrorType_TermNotMatch, Term: int64(term)}, nil
 	}
 
 	defer func() {
@@ -177,4 +181,37 @@ func (c *ClusterRpcService) joinNodeToCluster(req *pb.JoinClusterRequest) (*empt
 	}
 
 	return &emptypb.Empty{}, nil
+}
+
+func (c *ClusterRpcService) handleMetadata(req *pb.PublishMetadataRequest, response *pb.PublishMetadataResponse, err error) (*pb.PublishMetadataResponse, error) {
+	if c.cluster.State != cluster.Transitioning {
+		c.cluster.Log.Errorf("cluster metadata reception failed, the cluster state not match: %s, "+
+			"shoule be %s", c.cluster.State.String(), cluster.Transitioning.String())
+		return &pb.PublishMetadataResponse{ErrorType: pb.ErrorType_ClusterStateNotMatch, ClusterState: c.cluster.State.String()}, nil
+	}
+	leaderId, _, term := c.cluster.GetLeaderInfoFromRaft()
+	if req.LeaderId != leaderId {
+		c.cluster.Log.Errorf("cluster metadata reception failed, leader id not match, "+
+			"remote leader id: %s, current leader id: %s", req.LeaderId, leaderId)
+		return &pb.PublishMetadataResponse{ErrorType: pb.ErrorType_LeaderIdNotMatch, LeaderId: leaderId}, nil
+	}
+	if int(req.Term) != term {
+		c.cluster.Log.Errorf("cluster metadata reception failed, term not match, "+
+			"remote term: %d, current leader term: %d", req.Term, term)
+		return &pb.PublishMetadataResponse{ErrorType: pb.ErrorType_TermNotMatch, Term: int64(term)}, nil
+	}
+	defer func() {
+		if e := recover(); e != nil {
+			c.cluster.Log.Errorf("transfer leadership panic: %v", e)
+			response = nil
+			err = errors.New(fmt.Sprintf("%v", e))
+		}
+	}()
+
+	err = c.cluster.ApplyClusterMetaData(err, req)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.PublishMetadataResponse{ErrorType: pb.ErrorType_None}, nil
 }

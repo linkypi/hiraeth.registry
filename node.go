@@ -1,12 +1,12 @@
-package core
+package main
 
 import (
 	"encoding/json"
+	"github.com/linkypi/hiraeth.registry/cluster"
+	"github.com/linkypi/hiraeth.registry/cluster/rpc"
 	"github.com/linkypi/hiraeth.registry/config"
-	cluster "github.com/linkypi/hiraeth.registry/core/cluster"
-	"github.com/linkypi/hiraeth.registry/core/cluster/rpc"
-	network "github.com/linkypi/hiraeth.registry/core/network"
-	"github.com/linkypi/hiraeth.registry/core/service"
+	"github.com/linkypi/hiraeth.registry/network"
+	"github.com/linkypi/hiraeth.registry/service"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -22,7 +22,7 @@ type Node struct {
 	//myCluster  *cluster.Cluster
 	rpcService *rpc.ClusterRpcService
 	Config     config.NodeConfig
-	Network    *network.NetworkManager
+	Network    *network.Manager
 	socket     net.Listener
 	grpcServer *grpc.Server
 	shutDownCh chan struct{}

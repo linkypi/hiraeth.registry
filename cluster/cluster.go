@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/linkypi/hiraeth.registry/config"
-	"github.com/linkypi/hiraeth.registry/core/network"
-	"github.com/linkypi/hiraeth.registry/core/slot"
+	"github.com/linkypi/hiraeth.registry/network"
 	pb "github.com/linkypi/hiraeth.registry/proto"
+	"github.com/linkypi/hiraeth.registry/slot"
 	"github.com/sirupsen/logrus"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,7 +25,7 @@ const (
 )
 
 func NewCluster(conf *config.Config, selfNode *config.NodeInfo,
-	net *network.NetworkManager, shutDownCh chan struct{}, log *logrus.Logger) *Cluster {
+	net *network.Manager, shutDownCh chan struct{}, log *logrus.Logger) *Cluster {
 
 	slotManager := slot.NewManager(log, selfNode.Id, conf.NodeConfig.DataDir, conf.ClusterConfig.NumberOfReplicas)
 	cluster := Cluster{
@@ -36,7 +37,7 @@ func NewCluster(conf *config.Config, selfNode *config.NodeInfo,
 			nodeConfig:           &conf.NodeConfig,
 			ShutDownCh:           shutDownCh,
 			SelfNode:             selfNode,
-			notifyLeaderCh:       make(chan bool, 10),
+			notifyCh:             make(chan bool, 10),
 			ClusterExpectedNodes: conf.ClusterConfig.ClusterServers,
 			ClusterActualNodes:   conf.ClusterConfig.ClusterServers,
 			slotManager:          slotManager,
@@ -64,7 +65,7 @@ func (c *Cluster) Start(dataDir string) {
 	// start the raft server
 	c.startRaftNode(dataDir)
 
-	go c.monitoringLeadershipTransfer()
+	go c.monitoringClusterState()
 
 	go c.CheckConnClosed(c.ShutDownCh, func(id string) {
 		nodeInfo := c.ClusterActualNodes[id]
@@ -77,23 +78,59 @@ func (c *Cluster) Start(dataDir string) {
 	}
 }
 
-// 区分当前健康集群的节点列表以及配置中期望的集群节点列表
-func (c *Cluster) checkClusterState() {
+func (c *Cluster) handleClusterDowntime() {
 
+	if c.State == Down {
+		return
+	}
+
+	c.Log.Errorf("cluster is down or the network partitioned")
+	c.SetState(Down)
 }
 
-func (c *Cluster) monitoringLeadershipTransfer() {
+func (c *Cluster) monitoringClusterState() {
+	detectDownTimes := 1
 	for {
 		select {
+		// only be notified when a new leader is generated
 		case _ = <-c.Raft.LeaderCh():
-			go c.transferLeaderShip()
-
-		// Multiple guarantees to obtain leadership transfer notices
-		case _ = <-c.notifyLeaderCh:
-			go c.transferLeaderShip()
+			_, leaderId := c.Raft.LeaderWithID()
+			// When the cluster goes down, the leaderId may be empty
+			if leaderId != "" {
+				go c.transferLeaderShip()
+			}
 
 		case <-c.ShutDownCh:
 			return
+		default:
+			// The follower node can only check the cluster health status in this way
+			c.detectClusterState(&detectDownTimes)
+			time.Sleep(time.Millisecond * 500)
+		}
+	}
+}
+
+func (c *Cluster) detectClusterState(detectDownTimes *int) {
+	stats := c.Raft.Stats()
+	state := stats["state"]
+	c.Log.Debugf(" node state [%s]", state)
+
+	if state != string(c.SelfNode.State) {
+		c.SelfNode.State = config.NodeState(state)
+		c.SelfNode.LastStateUpdateTime = time.Now()
+	} else {
+		// If the current node has become a candidate node and the duration
+		// has exceeded one election cycles, detect three times. If the conditions are met, the cluster is down
+		duration := time.Now().Sub(c.SelfNode.LastStateUpdateTime).Milliseconds()
+		if c.SelfNode.State == config.Candidate && duration > int64(c.Config.RaftElectionTimeout) {
+			c.Log.Debugf("[Candidate] state duration [%d], detectDownTimes [%d]", duration, *detectDownTimes)
+			*detectDownTimes++
+			if *detectDownTimes > 3 {
+				*detectDownTimes = 0
+				c.handleClusterDowntime()
+			} else {
+				c.SelfNode.LastStateUpdateTime = time.Now()
+			}
 		}
 	}
 }
@@ -103,22 +140,19 @@ func (c *Cluster) transferLeaderShip() {
 	c.transferMtx.Lock()
 	defer c.transferMtx.Unlock()
 
-	oldLeader := c.BaseCluster.Leader
-
 	leaderAddr, leaderId := c.Raft.LeaderWithID()
 	stats := c.Raft.Stats()
 	term, _ := strconv.Atoi(stats[TermKey])
 
-	//  If the leader is not changed, it will not be executed
-	if oldLeader != nil && oldLeader.Id == string(leaderId) && oldLeader.Term == term {
-		// 很有可能是新节点加入集群,此时就需要读取metadata.json中的数据来判断前后的follower数量是否一致
-		// 若follower数量不一致则说明是新节点加入,需要重新调整数据分片
-		return
-	}
-
 	// First of all, we need to confirm which followers are led by the leader and whether the follower status is normal
 	future := c.Raft.VerifyLeader()
 	if future.Error() != nil {
+		// If the current node is the leader node before, the cluster is down or the
+		// network is partitioned, and only the current node remains in the cluster
+		if leaderId == "" {
+			c.Log.Errorf("cluster is down or the network is partitioned, and only the current node remains in the cluster")
+			go c.handleClusterDowntime()
+		}
 		c.Log.Errorf("failed to transfer leadership: %s", future.Error())
 		return
 	}
@@ -134,13 +168,15 @@ func (c *Cluster) transferLeaderShip() {
 
 	raftConf := c.Raft.GetConfiguration().Configuration()
 	nodes := c.getNodesByRaftServers(raftConf.Servers)
+
+	atomic.AddUint64(&c.clusterId, 1)
 	c.Leader.buildCluster(nodes)
 }
 
 func (c *Cluster) joinToCluster() {
-	connectedNodes := c.NetworkManager.GetConnectedNodes(c.ClusterExpectedNodes)
+	connectedNodes := c.Manager.GetConnectedNodes(c.ClusterExpectedNodes)
 	for _, node := range connectedNodes {
-		rpcClient := c.NetworkManager.GetInterRpcClient(node.Id)
+		rpcClient := c.Manager.GetInterRpcClient(node.Id)
 		request := pb.JoinClusterRequest{
 			NodeId:                c.SelfNode.Id,
 			NodeAddr:              c.SelfNode.Addr,

@@ -2,20 +2,18 @@ package rpc
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	cluster2 "github.com/linkypi/hiraeth.registry/cluster"
 	"github.com/linkypi/hiraeth.registry/config"
-	"github.com/linkypi/hiraeth.registry/core/cluster"
 	pb "github.com/linkypi/hiraeth.registry/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type ClusterRpcService struct {
-	cluster *cluster.Cluster
+	cluster *cluster2.Cluster
 	config  config.Config
 }
 
-func (c *ClusterRpcService) SetCluster(cluster *cluster.Cluster) {
+func (c *ClusterRpcService) SetCluster(cluster *cluster2.Cluster) {
 	c.cluster = cluster
 }
 func NewCRpcService(conf config.Config) *ClusterRpcService {
@@ -54,34 +52,5 @@ func (c *ClusterRpcService) GetFollowerInfo(_ context.Context, req *pb.FollowerI
 }
 
 func (c *ClusterRpcService) PublishMetadata(_ context.Context, req *pb.PublishMetadataRequest) (response *pb.PublishMetadataResponse, err error) {
-
-	if c.cluster.State != cluster.Transitioning {
-		c.cluster.Log.Errorf("cluster metadata reception failed, the cluster state not match: %s, "+
-			"shoule be %s", c.cluster.State.String(), cluster.Transitioning.String())
-		return &pb.PublishMetadataResponse{ErrorType: pb.ErrorType_ClusterStateNotMatch, ClusterState: c.cluster.State.String()}, nil
-	}
-	if req.LeaderId != c.cluster.Leader.Id {
-		c.cluster.Log.Errorf("cluster metadata reception failed, leader id not match, "+
-			"remote leader id: %s, current leader id: %s", req.LeaderId, c.cluster.Leader.Id)
-		return &pb.PublishMetadataResponse{ErrorType: pb.ErrorType_LeaderIdNotMatch, LeaderId: c.cluster.Leader.Id}, nil
-	}
-	if int(req.Term) != c.cluster.Leader.Term {
-		c.cluster.Log.Errorf("cluster metadata reception failed, term not match, "+
-			"remote term: %d, current leader term: %d", req.Term, c.cluster.Leader.Term)
-		return &pb.PublishMetadataResponse{ErrorType: pb.ErrorType_TermNotMatch, Term: int64(c.cluster.Leader.Term)}, nil
-	}
-	defer func() {
-		if e := recover(); e != nil {
-			c.cluster.Log.Errorf("transfer leadership panic: %v", e)
-			response = nil
-			err = errors.New(fmt.Sprintf("%v", e))
-		}
-	}()
-
-	err = c.cluster.ApplyClusterMetaData(err, req)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pb.PublishMetadataResponse{ErrorType: pb.ErrorType_None}, nil
+	return c.handleMetadata(req, response, err)
 }

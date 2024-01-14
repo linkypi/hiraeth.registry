@@ -3,9 +3,9 @@ package config
 import (
 	"encoding/json"
 	"github.com/sirupsen/logrus"
+	"time"
 )
 
-// server node Info
 type NodeInfo struct {
 	Id                    string
 	Ip                    string
@@ -15,7 +15,19 @@ type NodeInfo struct {
 	externalTcpPort       int
 	IsCandidate           bool
 	AutoJoinClusterEnable bool
+
+	// Leader, Follower, Candidate
+	State               NodeState
+	LastStateUpdateTime time.Time
 }
+
+type NodeState string
+
+const (
+	Leader    NodeState = "Leader"
+	Follower  NodeState = "Follower"
+	Candidate NodeState = "Candidate"
+)
 
 func (s NodeInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{

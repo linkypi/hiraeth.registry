@@ -3,11 +3,12 @@ package cluster
 import (
 	"encoding/json"
 	"github.com/linkypi/hiraeth.registry/config"
-	"github.com/linkypi/hiraeth.registry/core/slot"
+	"github.com/linkypi/hiraeth.registry/slot"
 )
 
 // MetaData Refer to the implementation of Redis to map machines and slots
 type MetaData struct {
+	ClusterId       uint64                     `json:"clusterId"`
 	LeaderId        string                     `json:"leaderId"`
 	Term            int                        `json:"term"`
 	ExpectedNodeMap map[string]config.NodeInfo `json:"expectedNodeMap"`

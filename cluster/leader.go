@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"github.com/hashicorp/raft"
 	"github.com/linkypi/hiraeth.registry/config"
-	"github.com/linkypi/hiraeth.registry/core/slot"
 	pb "github.com/linkypi/hiraeth.registry/proto"
+	"github.com/linkypi/hiraeth.registry/slot"
 	"github.com/linkypi/hiraeth.registry/util"
 	"gopkg.in/fatih/set.v0"
 	"time"
@@ -129,6 +129,7 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 	formattedTime := time.Now().Format("2006-01-02 15:04:05")
 	// persist the meta data
 	metaData := MetaData{
+		ClusterId:       l.clusterId,
 		LeaderId:        l.Leader.Id,
 		Term:            l.Leader.Term,
 		Shards:          shards,
@@ -145,7 +146,7 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 	if err != nil {
 		return err
 	}
-	l.Log.Infof("meta data: %s", string(marshal))
+	l.Log.Debugf("meta data: %s", string(marshal))
 
 	err = util.PersistToJsonFileWithCheckSum(l.nodeConfig.DataDir+MetaDataFileName, metaData)
 	if err != nil {

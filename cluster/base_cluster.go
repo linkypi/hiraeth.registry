@@ -5,27 +5,31 @@ import (
 	"fmt"
 	"github.com/hashicorp/raft"
 	"github.com/linkypi/hiraeth.registry/config"
-	"github.com/linkypi/hiraeth.registry/core/network"
-	"github.com/linkypi/hiraeth.registry/core/slot"
+	"github.com/linkypi/hiraeth.registry/network"
+	"github.com/linkypi/hiraeth.registry/slot"
 	"github.com/sirupsen/logrus"
+	"strconv"
 	"sync"
 )
 
 type BaseCluster struct {
-	*network.NetworkManager
+	*network.Manager
 	slotManager *slot.Manager
 	Log         *logrus.Logger
 
-	State    State
-	StateMtx sync.Mutex
+	State       State
+	StateMtx    sync.Mutex
+	metaDataMtx sync.Mutex
 
-	Leader         *Leader
-	Raft           *raft.Raft
-	Config         *config.ClusterConfig
-	nodeConfig     *config.NodeConfig
-	ShutDownCh     chan struct{}
-	SelfNode       *config.NodeInfo
-	notifyLeaderCh chan bool
+	Leader     *Leader
+	Raft       *raft.Raft
+	Config     *config.ClusterConfig
+	nodeConfig *config.NodeConfig
+	ShutDownCh chan struct{}
+	SelfNode   *config.NodeInfo
+	notifyCh   chan bool
+
+	clusterId uint64
 
 	// all cluster nodes configured in the configuration
 	ClusterExpectedNodes map[string]*config.NodeInfo
@@ -47,6 +51,8 @@ const (
 	// In this process, the cluster will resize the data shards, just
 	// processes read requests and rejects write requests
 	Transitioning
+
+	Down
 	// StandBy The cluster is in a standby state and can only be read
 	// It's possible that the cluster is electing a leader
 	StandBy
@@ -56,7 +62,7 @@ const (
 )
 
 func (s State) String() string {
-	names := [...]string{"Initializing", "Active", "Transitioning", "StandBy", "Maintenance", "Unknown"}
+	names := [...]string{"Initializing", "Active", "Transitioning", "Down", "StandBy", "Maintenance", "Unknown"}
 	if s < 0 || s > State(len(names)-1) {
 		return "Unknown"
 	}
@@ -69,8 +75,8 @@ func (b *BaseCluster) SetState(state State) {
 	b.State = state
 }
 
-func (b *BaseCluster) setNet(net *network.NetworkManager) {
-	b.NetworkManager = net
+func (b *BaseCluster) setNet(net *network.Manager) {
+	b.Manager = net
 }
 
 func (b *BaseCluster) RaftExistNode(id string) bool {
@@ -225,4 +231,11 @@ func (b *BaseCluster) IsLeader() bool {
 
 func (b *BaseCluster) IsActive() bool {
 	return b.State == Active
+}
+
+func (b *BaseCluster) GetLeaderInfoFromRaft() (string, string, int) {
+	leaderAddr, leaderId := b.Raft.LeaderWithID()
+	stats := b.Raft.Stats()
+	term, _ := strconv.Atoi(stats[TermKey])
+	return string(leaderId), string(leaderAddr), term
 }

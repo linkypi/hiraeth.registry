@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-type NetworkManager struct {
+type Manager struct {
 	log          *logrus.Logger
 	LocalAddress raft.ServerAddress
 
@@ -45,9 +45,9 @@ type conn struct {
 	mtx            sync.Mutex
 }
 
-func NewNetworkManager(localAddress string, log *logrus.Logger) *NetworkManager {
+func NewNetworkManager(localAddress string, log *logrus.Logger) *Manager {
 	address := raft.ServerAddress(localAddress)
-	m := &NetworkManager{
+	m := &Manager{
 		log:          log,
 		LocalAddress: address,
 		RpcChan:      make(chan raft.RPC),
@@ -57,7 +57,7 @@ func NewNetworkManager(localAddress string, log *logrus.Logger) *NetworkManager 
 	return m
 }
 
-func (net *NetworkManager) GetConnectedNodeIds(clusterServers map[string]*config.NodeInfo) []string {
+func (net *Manager) GetConnectedNodeIds(clusterServers map[string]*config.NodeInfo) []string {
 	arr := make([]string, 0, 8)
 	for _, node := range clusterServers {
 		_, ok := net.Connections[node.Id]
@@ -68,7 +68,7 @@ func (net *NetworkManager) GetConnectedNodeIds(clusterServers map[string]*config
 	return arr
 }
 
-func (net *NetworkManager) GetConnectedNodes(clusterServers map[string]*config.NodeInfo) []config.NodeInfo {
+func (net *Manager) GetConnectedNodes(clusterServers map[string]*config.NodeInfo) []config.NodeInfo {
 	arr := make([]config.NodeInfo, 0, 8)
 	for _, node := range clusterServers {
 		_, ok := net.Connections[node.Id]
@@ -79,7 +79,7 @@ func (net *NetworkManager) GetConnectedNodes(clusterServers map[string]*config.N
 	return arr
 }
 
-func (net *NetworkManager) GetRaftClient(id string) (pb.RaftTransportClient, error) {
+func (net *Manager) GetRaftClient(id string) (pb.RaftTransportClient, error) {
 	if !net.ExistConn(id) {
 		return nil, errors.New("connection not exist, id: " + id)
 	}
@@ -96,14 +96,14 @@ func (net *NetworkManager) GetRaftClient(id string) (pb.RaftTransportClient, err
 	return conn.raftClient, nil
 }
 
-func (net *NetworkManager) GetInterRpcClient(id string) pb.ClusterServiceClient {
+func (net *Manager) GetInterRpcClient(id string) pb.ClusterServiceClient {
 	if !net.ExistConn(id) {
 		return nil
 	}
 	return net.Connections[id].InternalClient
 }
 
-func (net *NetworkManager) IsConnected(id string) bool {
+func (net *Manager) IsConnected(id string) bool {
 	if !net.ExistConn(id) {
 		return false
 	}
@@ -112,12 +112,12 @@ func (net *NetworkManager) IsConnected(id string) bool {
 	return state == connectivity.Ready || state == connectivity.Idle
 }
 
-func (net *NetworkManager) ExistConn(id string) bool {
+func (net *Manager) ExistConn(id string) bool {
 	_, ok := net.Connections[id]
 	return ok
 }
 
-func (net *NetworkManager) GetConnByAddr(addr string) (*conn, error) {
+func (net *Manager) GetConnByAddr(addr string) (*conn, error) {
 	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
 	id, ok := net.AddrIdMap[addr]
 	if !ok {
@@ -130,7 +130,7 @@ func (net *NetworkManager) GetConnByAddr(addr string) (*conn, error) {
 	return con, nil
 }
 
-func (net *NetworkManager) AddConn(id, addr string, grpcConn *grpc.ClientConn,
+func (net *Manager) AddConn(id, addr string, grpcConn *grpc.ClientConn,
 	internalServClient pb.ClusterServiceClient, raftClient pb.RaftTransportClient) {
 	net.ConnectionsMtx.Lock()
 	defer net.ConnectionsMtx.Unlock()
@@ -163,7 +163,7 @@ func (net *NetworkManager) AddConn(id, addr string, grpcConn *grpc.ClientConn,
 
 }
 
-func (net *NetworkManager) CloseAllConn() error {
+func (net *Manager) CloseAllConn() error {
 	net.ConnectionsMtx.Lock()
 	defer net.ConnectionsMtx.Unlock()
 
@@ -186,7 +186,7 @@ func (net *NetworkManager) CloseAllConn() error {
 	return nil
 }
 
-func (net *NetworkManager) CloseConn(nodeId string) error {
+func (net *Manager) CloseConn(nodeId string) error {
 	net.ConnectionsMtx.Lock()
 	defer net.ConnectionsMtx.Unlock()
 
@@ -207,7 +207,7 @@ func (net *NetworkManager) CloseConn(nodeId string) error {
 	return nil
 }
 
-func (net *NetworkManager) CheckConnClosed(shutDownCh chan struct{}, reconnect func(string)) {
+func (net *Manager) CheckConnClosed(shutDownCh chan struct{}, reconnect func(string)) {
 	for {
 		select {
 		case <-shutDownCh:
