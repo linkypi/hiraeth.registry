@@ -2,7 +2,11 @@ package util
 
 import (
 	"errors"
+	"fmt"
 	"github.com/sourcegraph/conc"
+	"runtime"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -85,4 +89,16 @@ func WaitUntilExecSuccess(timeout time.Duration, stopCh chan struct{}, execFunc 
 		}
 		return nil
 	}
+}
+
+func GoID() int {
+	var buf [64]byte
+	n := runtime.Stack(buf[:], false)
+	str := strings.TrimPrefix(string(buf[:n]), "goroutine ")
+	idField := strings.Fields(str)[0]
+	id, err := strconv.Atoi(idField)
+	if err != nil {
+		panic(fmt.Sprintf("can not get goroutine id: %v", err))
+	}
+	return id
 }

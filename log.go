@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
+	util "github.com/linkypi/hiraeth.registry/util"
 	"github.com/sirupsen/logrus"
 	"io"
 	"os"
 	"path"
-	"runtime"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -48,7 +46,7 @@ func (t LogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 	}
 
 	timestamp := entry.Time.Format("2006-01-02 15:04:06.000")
-	id := GoID()
+	id := util.GoID()
 	if entry.HasCaller() {
 		// customize the file path
 		//funcName := entry.Caller.Function
@@ -62,17 +60,6 @@ func (t LogFormatter) Format(entry *logrus.Entry) ([]byte, error) {
 			timestamp, levelColor, entry.Level, entry.Message)
 	}
 	return buffer.Bytes(), nil
-}
-
-func GoID() int {
-	var buf [64]byte
-	n := runtime.Stack(buf[:], false)
-	idField := strings.Fields(strings.TrimPrefix(string(buf[:n]), "goroutine "))[0]
-	id, err := strconv.Atoi(idField)
-	if err != nil {
-		panic(fmt.Sprintf("can not get goroutine id: %v", err))
-	}
-	return id
 }
 
 // init logrus
