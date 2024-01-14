@@ -124,3 +124,42 @@ go get go.etcd.io/etcd/wal
 
 ```
 
+一. 集群新增节点调整:
+1. 重新对数据分片, 分片期间数据只读
+2. 数据逐步迁移, 直到迁移完成
+
+二. 宕机恢复实现
+1. 检查集群 id 是否一致, 若一致说明
+
+三. 定期存储 raft 相关统计数据, 以便宕机恢复排查问题
+四. 限流: 如果 Raft 模块已提交的日志索引（committed index）比已应用到状态机的日志索引（applied index）超过了 5000，那么它就返回一个”etcdserver: too many requests” 错误给 client
+
+etcdserver 从 Raft 模块获取到以上消息和日志条目后，作为 Leader，它会将 put 提案消息广播给集群各个节点，同时需要把集群 Leader 任期号、投票信息、已提交索引、提案内容持久化到一个 WAL（Write Ahead Log）日志文件中，用于保证集群的一致性、可恢复性
+
+五. 幂等问题处理, 全局递增提案 ID
+
+六. CP 模式下, 新的 Follower 加入集群后, 增加同步数据的时间限制  initlimit
+
+七. 热点 Key 处理
+当有请求进来读写普通节点时，节点内会同时做请求 Key 的统计。如果某个 Key 达到了一定的访问量或者带宽的占用量，会自动触发流控以限制热点 Key 访问，防止节点被热点请求打满。同时，监控服务会周期性的去所有 Redis 实例上查询统计到的热点 Key。如果有热点，监控服务会把热点 Key 所在 Slot 上报到我们的迁移服务。迁移服务这时会把热点主从节点加入到这个集群中，然后把热点 Slot 迁移到这个热点主从上。因为热点主从上只有热点 Slot 的请求，所以热点 Key 的处理能力得到了大幅提升。通过这样的设计，我们可以做到实时的热点监控，并及时通过流控去止损；通过热点迁移，我们能做到自动的热点隔离和快速的容量扩充。
+
+八. 集群宕机处理, 数据复制问题
+全量与增量同步
+
+九. WAL 考虑使用 mmap 实现, 提升 IO 性能
+https://www.cnblogs.com/oxspirt/p/14633182.html
+
+
+Cockroach 对 MultiRaft 的定义
+> In CockroachDB, we use the Raft consensus algorithm to ensure that your data remains consistent even when machines fail. In most systems that use Raft, such as etcd and Consul, the entire system is one Raft consensus group. In CockroachDB, however, the data is divided into ranges, each with its own consensus group. This means that each node may be participating in hundreds of thousands of consensus groups. This presents some unique challenges, which we have addressed by introducing a layer on top of Raft that we call MultiRaft.
+
+hMultiRaft 参考:
+https://zhuanlan.zhihu.com/p/33047950
+https://cn.pingcap.com/blog/the-design-and-implementation-of-multi-raft/
+https://blog.csdn.net/JSWANGCHANG/article/details/122534755?spm=1001.2101.3001.6650.13&utm_medium=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7ERate-13-122534755-blog-107682089.235%5Ev40%5Epc_relevant_3m_sort_dl_base1&depth_1-utm_source=distribute.pc_relevant.none-task-blog-2%7Edefault%7EBlogCommendFromBaidu%7ERate-13-122534755-blog-107682089.235%5Ev40%5Epc_relevant_3m_sort_dl_base1&utm_relevant_index=14
+https://ggaaooppeenngg.github.io/zh-CN/2017/04/07/MultiRaft-%E8%A7%A3%E6%9E%90/
+
+
+
+分布式 KV 系统参考 : https://tech.meituan.com/2020/07/01/kv-squirrel-cellar.html
+
