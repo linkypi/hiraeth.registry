@@ -1,0 +1,14 @@
+syntax = "proto3";
+import "google/protobuf/empty.proto";
+option go_package = "../proto";
+
+enum ErrorType {
+  None = 0;
+  ClusterStateNotMatch = 1;
+  ClusterIdNotMatch = 2;
+  LeaderIdNotMatch = 3;
+  TermNotMatch = 4;
+
+  MetaDataChanged = 5;
+  UnknownError = 6;
+}
