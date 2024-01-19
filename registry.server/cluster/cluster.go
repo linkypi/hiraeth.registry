@@ -28,19 +28,20 @@ func NewCluster(conf *config.Config, selfNode *config.NodeInfo, slotManager *slo
 
 	cluster := Cluster{
 		BaseCluster: &BaseCluster{
-			Log:                  log.Log,
-			StartUpMode:          conf.StartupMode,
-			joinCluster:          conf.JoinCluster,
-			Config:               &conf.ClusterConfig,
-			NodeConfig:           &conf.NodeConfig,
-			ShutDownCh:           shutDownCh,
-			SelfNode:             selfNode,
-			notifyCh:             make(chan bool, 10),
-			ClusterExpectedNodes: conf.ClusterConfig.ClusterServers,
-			ClusterActualNodes:   conf.ClusterConfig.ClusterServers,
-			SlotManager:          slotManager,
+			Log:         log.Log,
+			StartUpMode: conf.StartupMode,
+			joinCluster: conf.JoinCluster,
+			Config:      &conf.ClusterConfig,
+			NodeConfig:  &conf.NodeConfig,
+			ShutDownCh:  shutDownCh,
+			SelfNode:    selfNode,
+			notifyCh:    make(chan bool, 10),
+			SlotManager: slotManager,
 		},
 	}
+	clusterNodes := cluster.CopyClusterNodes(conf.ClusterConfig.ClusterServers)
+	cluster.ClusterExpectedNodes = clusterNodes
+	cluster.ClusterActualNodes = clusterNodes
 	cluster.SetState(Initializing)
 	cluster.setNet(net)
 	return &cluster
@@ -69,7 +70,7 @@ func (c *Cluster) Start(dataDir string) {
 	go c.CheckConnClosed(c.ShutDownCh, func(id string) {
 		nodeInfo := c.ClusterActualNodes[id]
 		c.Log.Infof("node %s is disconnected, re-establish the connection: %s", nodeInfo.Id, nodeInfo.Addr)
-		c.ConnectToNode(*nodeInfo)
+		c.ConnectToNode(nodeInfo)
 	})
 
 	if c.SelfNode.AutoJoinClusterEnable && c.joinCluster {

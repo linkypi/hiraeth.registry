@@ -135,10 +135,10 @@ func createClient(addr string, shutdownCh chan struct{}, logger *logrus.Logger) 
 	client := NewClient(4096, shutdownCh, logger)
 	client.SetReadCallBack(func(bytes []byte, conn net.Conn, err error) {
 		if err != nil {
-			client.onReceive(nil, err)
+			client.onReceive(nil, conn, err)
 			return
 		}
-		client.onReceive(bytes, nil)
+		client.onReceive(bytes, conn, nil)
 	})
 	err := client.Start(addr)
 	if err != nil {

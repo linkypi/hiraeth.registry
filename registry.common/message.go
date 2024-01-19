@@ -25,12 +25,20 @@ type RequestType uint8
 
 func (t RequestType) String() string {
 	switch t {
+	case Nop:
+		return "Nop"
 	case Heartbeat:
 		return "Heartbeat"
 	case Register:
 		return "Register"
 	case Subscribe:
 		return "Subscribe"
+	case PublishServiceChanged:
+		return "PublishServiceChanged"
+	case FetchMetadata:
+		return "FetchMetadata"
+	case FetchServiceInstance:
+		return "FetchServiceInstance"
 	default:
 		return ""
 	}

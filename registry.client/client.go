@@ -9,6 +9,7 @@ import (
 	"github.com/panjf2000/gnet/pkg/pool/goroutine"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,7 +30,8 @@ type Client struct {
 	shards       map[string]common.Shard
 	clusterNodes map[string]string
 
-	serviceInstances []common.ServiceInstance
+	turnOnServiceSubs bool
+	serviceInstances  []common.ServiceInstance
 
 	serviceName string
 	ip          string
@@ -66,7 +68,7 @@ func (c *Client) SetEventHandler(handler gnet.EventHandler) {
 }
 
 func (c *Client) RegisterAsync(serviceName, ip string, port int, callback func(response common.Response, err error)) error {
-	requestId, err := c.register(serviceName, ip, port)
+	requestKey, err := c.register(serviceName, ip, port)
 	if err != nil {
 		c.log.Errorf("failed to async register: %v", err)
 		return err
@@ -74,7 +76,8 @@ func (c *Client) RegisterAsync(serviceName, ip string, port int, callback func(r
 	c.serviceName = serviceName
 	c.ip = ip
 	c.port = port
-	c.asyncWait(common.Register.String()+strconv.Itoa(int(requestId)), func(a any, err2 error) {
+
+	c.asyncWait(requestKey, func(a any, err2 error) {
 		if err2 == nil {
 			callback(a.(common.Response), nil)
 			return
@@ -92,16 +95,17 @@ func (c *Client) sendHeartbeatsInPeriod() {
 			return
 		default:
 			time.Sleep(time.Second * 5)
-			requestId, err := c.sendHeartbeat(c.serviceName, c.ip, c.port)
+			requestKey, err := c.sendHeartbeat(c.serviceName, c.ip, c.port)
 			if err != nil {
 				c.log.Errorf("failed to send heartbeat: %v", err)
 				if strings.Contains(err.Error(), "connection refused") {
 
 				}
 			}
-			c.asyncWait(common.Heartbeat.String()+strconv.Itoa(int(requestId)), func(a any, err2 error) {
-				if err2 != nil {
-					c.log.Warnf("failed to send heartbeat: %v", a)
+
+			c.asyncWait(requestKey, func(a any, err error) {
+				if err != nil {
+					c.log.Warnf("failed to send heartbeat: %v", err)
 				}
 				c.log.Debug("send heartbeat success")
 			})
@@ -111,11 +115,12 @@ func (c *Client) sendHeartbeatsInPeriod() {
 
 func (c *Client) Register(serviceName, ip string, port int, timeout time.Duration) (common.Response, error) {
 
-	requestId, err := c.register(serviceName, ip, port)
+	requestKey, err := c.register(serviceName, ip, port)
 	if err != nil {
 		return common.Response{}, err
 	}
-	res, err := c.syncWait(common.Register.String()+strconv.Itoa(int(requestId)), timeout)
+
+	res, err := c.syncWait(requestKey, timeout)
 	if err != nil {
 		return common.Response{}, err
 	}
@@ -170,15 +175,16 @@ func (c *Client) FetchServiceInstances() (*pb.FetchServiceResponse, error) {
 	request := pb.FetchServiceRequest{
 		ServiceName: c.serviceName,
 	}
-	requestId, err := c.sendRequest(c.addr, common.FetchServiceInstance, &request)
+	requestKey, err := c.sendRequest(c.addr, common.FetchServiceInstance, &request)
 	if err != nil {
 		c.log.Warnf("fetch service instance request failed, err: %v", err)
 		return nil, err
 	}
-	res, err := c.syncWait(common.FetchServiceInstance.String()+strconv.Itoa(int(requestId)), time.Second*10)
+
+	res, err := c.syncWait(requestKey, time.Second*10)
 	response := res.(common.Response)
 	var sresp *pb.FetchServiceResponse
-	err = common.Decode(response.Payload, sresp)
+	err = proto.Unmarshal(response.Payload, sresp)
 	if err != nil {
 		c.log.Warnf("decode fetch service instance response failed, err: %v", err)
 		return nil, err
@@ -193,7 +199,7 @@ func (c *Client) fetchMetadata() error {
 		return err
 	}
 	var metadata pb.FetchMetadataResponse
-	err = common.Decode(response.Payload, &metadata)
+	err = proto.Unmarshal(response.Payload, &metadata)
 	if err != nil {
 		c.log.Errorf("failed to decode metadata: %v", err)
 		return err
@@ -212,11 +218,11 @@ func (c *Client) fetchMetadata() error {
 }
 
 func (c *Client) Subscribe(serviceName string, timeout time.Duration) (common.Response, error) {
-	requestId, err := c.subscribe(serviceName)
+	requestKey, err := c.subscribe(serviceName)
 	if err != nil {
 		return common.Response{}, err
 	}
-	res, err := c.syncWait(common.Subscribe.String()+strconv.Itoa(int(requestId)), timeout)
+	res, err := c.syncWait(requestKey, timeout)
 	if err != nil {
 		return common.Response{}, err
 	}
@@ -229,15 +235,17 @@ func (c *Client) Subscribe(serviceName string, timeout time.Duration) (common.Re
 		}
 		return c.Subscribe(serviceName, timeout)
 	}
+	c.turnOnServiceSubs = true
 	return response, nil
 }
 
 func (c *Client) FetchMetadata() (common.Response, error) {
-	requestId, err := c.sendRequest(c.addr, common.FetchMetadata, nil)
+	requestKey, err := c.sendRequest(c.addr, common.FetchMetadata, nil)
 	if err != nil {
 		return common.Response{}, err
 	}
-	res, err := c.syncWait(common.FetchMetadata.String()+strconv.Itoa(int(requestId)), 30*time.Second)
+
+	res, err := c.syncWait(requestKey, 30*time.Second)
 	if err != nil {
 		return common.Response{}, err
 	}
@@ -245,7 +253,6 @@ func (c *Client) FetchMetadata() (common.Response, error) {
 }
 
 func (c *Client) syncWait(requestKey string, timeout time.Duration) (any, error) {
-	c.Store(requestKey, nil)
 	after := time.After(timeout)
 	for {
 		select {
@@ -266,7 +273,6 @@ func (c *Client) syncWait(requestKey string, timeout time.Duration) (any, error)
 }
 
 func (c *Client) asyncWait(requestKey string, callback func(any, error)) {
-	c.Store(requestKey, nil)
 	timer := time.NewTimer(time.Second * 60) // To prevent syncing.Map memory leak, set a timeout
 	_ = c.pool.Submit(func() {
 		for {
@@ -293,7 +299,7 @@ func (c *Client) asyncWait(requestKey string, callback func(any, error)) {
 	})
 }
 
-func (c *Client) sendHeartbeat(serviceName string, ip string, port int) (uint64, error) {
+func (c *Client) sendHeartbeat(serviceName string, ip string, port int) (string, error) {
 	heartbeatRequest := pb.HeartbeatRequest{
 		ServiceName: serviceName,
 		ServiceIp:   ip,
@@ -301,13 +307,13 @@ func (c *Client) sendHeartbeat(serviceName string, ip string, port int) (uint64,
 	}
 	connKey, err := c.checkMetadataAndConnection(serviceName)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	reqId, err := c.sendRequest(connKey, common.Heartbeat, &heartbeatRequest)
-	return reqId, err
+	reqKey, err := c.sendRequest(connKey, common.Heartbeat, &heartbeatRequest)
+	return reqKey, err
 }
 
-func (c *Client) register(serviceName string, ip string, port int) (uint64, error) {
+func (c *Client) register(serviceName string, ip string, port int) (string, error) {
 	regRequest := pb.RegisterRequest{
 		ServiceName: serviceName,
 		ServiceIp:   ip,
@@ -315,7 +321,7 @@ func (c *Client) register(serviceName string, ip string, port int) (uint64, erro
 	}
 	connKey, err := c.checkMetadataAndConnection(serviceName)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	return c.sendRequest(connKey, common.Register, &regRequest)
 }
@@ -350,31 +356,34 @@ func (c *Client) getAddr(serverId string) (string, error) {
 	return addr, nil
 }
 
-func (c *Client) sendRequest(connKey string, requestType common.RequestType, request proto.Message) (uint64, error) {
+func (c *Client) sendRequest(connKey string, requestType common.RequestType, request proto.Message) (string, error) {
 	requestId, toBytes, err := common.BuildRequestToBytes(requestType, request)
 	if err != nil {
 		c.log.Errorf("Error encoding pb: %v", err)
-		return 0, err
+		return "", err
 	}
 	_, err = (*c.connMap[connKey]).Write(toBytes)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return requestId, nil
+	requestKey := requestType.String() + strconv.Itoa(int(requestId))
+	c.Store(requestKey, nil)
+	c.log.Debugf("send request: %s", requestKey)
+	return requestKey, nil
 }
 
-func (c *Client) subscribe(serviceName string) (uint64, error) {
+func (c *Client) subscribe(serviceName string) (string, error) {
 	subRequest := pb.SubscribeRequest{
 		ServiceName: serviceName,
 	}
 	connKey, err := c.checkMetadataAndConnection(serviceName)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	return c.sendRequest(connKey, common.Subscribe, &subRequest)
 }
 
-func (c *Client) onReceive(bytes []byte, err error) {
+func (c *Client) onReceive(bytes []byte, conn net.Conn, err error) {
 	if err != nil {
 		c.log.Errorf("failed to receive data: %v", err)
 		return
@@ -404,6 +413,7 @@ func (c *Client) onReceive(bytes []byte, err error) {
 			return
 		}
 		requestKey := res.RequestType.String() + strconv.Itoa(int(res.RequestId))
+		c.log.Debugf("receive response : %s", requestKey)
 		c.Store(requestKey, res)
 	} else {
 		c.log.Errorf("invalid msg: %v", err)
@@ -423,10 +433,13 @@ func (c *Client) Close() {
 }
 
 func (c *Client) checkConnection(serverId, addr string) (string, error) {
-	conn, err := CreatConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
-	if err != nil {
-		return "", err
+	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
+	if _, ok := c.connMap[addr]; !ok {
+		conn, err := CreatConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
+		if err != nil {
+			return "", err
+		}
+		c.connMap[addr] = &conn
 	}
-	c.connMap[addr] = &conn
 	return addr, nil
 }

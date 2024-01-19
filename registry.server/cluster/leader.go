@@ -125,7 +125,13 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 	followerIds := l.GetNodeIdsIgnoreSelf(clusterNodes)
 	shards, replicas := l.SlotManager.AllocateSlots(l.Leader.Id, followerIds, *l.Config)
 
-	actualNodesMap := l.CopyClusterNodes(l.ClusterActualNodes)
+	marshal, err := json.Marshal(l.ClusterActualNodes)
+	if err != nil {
+		return err
+	}
+	l.Log.Debugf("cluster actual nodes before build meta data: %s", string(marshal))
+
+	actualNodesMap := l.ClusterActualNodes
 	actualNodes := l.MapToList(actualNodesMap)
 
 	formattedTime := time.Now().Format("2006-01-02 15:04:05")
@@ -140,13 +146,13 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 		Replicas:        replicas,
 		NodeConfig:      *l.NodeConfig,
 		ClusterConfig:   *l.Config,
-		ExpectedNodeMap: l.CopyClusterNodes(l.ClusterExpectedNodes),
+		ExpectedNodeMap: l.ClusterExpectedNodes,
 		ActualNodeMap:   actualNodesMap,
 		ActualNodes:     actualNodes,
 		CreateTime:      formattedTime,
 	}
 
-	marshal, err := json.Marshal(metaData)
+	marshal, err = json.Marshal(metaData)
 	if err != nil {
 		return err
 	}

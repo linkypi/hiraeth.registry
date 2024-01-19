@@ -6,10 +6,18 @@ import (
 	"errors"
 	"github.com/linkypi/hiraeth.registry/common"
 	"net"
+	"strings"
+	"sync"
 	"time"
 )
 
 func (c *Client) Start(addr string) error {
+	if _, ok := c.connMap[addr]; ok {
+		c.log.Debugf("connection already exists: %s", addr)
+		return nil
+	}
+
+	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
 	winCon, err := CreatConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
 	if err != nil {
 		return err
@@ -19,6 +27,22 @@ func (c *Client) Start(addr string) error {
 	c.connMap[addr] = &winCon
 	go c.checkConn(addr, &winCon)
 	return nil
+}
+
+func (c *Client) onReconnectSuccess(con *Conn) {
+
+	_ = c.fetchMetadata()
+	// If the client has enabled a service subscription, the subscription
+	// will be initiated again after the reconnection is successful
+	if c.turnOnServiceSubs {
+		// Resubscribing to the service
+		_, err := c.Subscribe(c.serviceName, time.Second*10)
+		if err == nil {
+			c.log.Infof("resubscribe to %s success", c.serviceName)
+		} else {
+			c.log.Warnf("resubscribe to %s failed: %v", c.serviceName, err)
+		}
+	}
 }
 
 // To determine whether the connection is closed by reading data
@@ -49,11 +73,16 @@ func (c *Client) checkConn(addr string, conn *Conn) {
 			// There won't be too many server nodes, so there's no sync.Map for concurrency control here.
 			c.connMap[addr] = &newCon
 			c.log.Infof("reconnect to %s success", addr)
+
+			go c.onReconnectSuccess(&newCon)
 			go c.checkConn(addr, &newCon)
+
 			break
 		}
 	}
 }
+
+var conLock sync.Map
 
 func CreatConn(addr string, readBufSize int, shutdownCh chan struct{}, readCallback ReadCallBack) (Conn, error) {
 
@@ -64,6 +93,15 @@ func CreatConn(addr string, readBufSize int, shutdownCh chan struct{}, readCallb
 	if readCallback == nil {
 		return nil, errors.New("readCallback is nil")
 	}
+
+	lockKey := "CON_MTX_" + addr
+	_, ok := conLock.Load(lockKey)
+	if ok {
+		common.Log.Debugf("conn is already exist, %s, wait for the conn to complete", addr)
+		return nil, errors.New("conn is already exist")
+	}
+	conLock.Store(lockKey, addr)
+	defer conLock.Delete(lockKey)
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -76,7 +114,7 @@ func CreatConn(addr string, readBufSize int, shutdownCh chan struct{}, readCallb
 	_ = tcpConn.SetKeepAlivePeriod(time.Second * 5)
 	_ = tcpConn.SetNoDelay(true)
 	_ = tcpConn.SetReadBuffer(readBufSize)
-	_ = tcpConn.SetDeadline(time.Now().Add(2 * time.Minute))
+	//_ = tcpConn.SetDeadline(time.Now().Add(2 * time.Minute))
 
 	reader := NewReader(conn, readBufSize)
 	winConn := WinConn{conn: tcpConn}

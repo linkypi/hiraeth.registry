@@ -27,7 +27,7 @@ func (b *BaseCluster) startRaftNode(dataDir string) {
 	// The nodes that come in here should be the nodes that
 	// have been connected and satisfy the election quorum number
 	// not the nodes in the cluster.server.addr configuration
-	connectedNodes := b.GetConnectedNodes(b.Config.ClusterServers)
+	connectedNodes := b.GetConnectedNodes(b.ClusterExpectedNodes)
 	connectedNodes = append(connectedNodes, *b.SelfNode)
 	var peers = make([]raft.Server, 0, len(connectedNodes))
 	for _, node := range connectedNodes {
@@ -415,9 +415,14 @@ func (b *BaseCluster) ApplyClusterMetaData(err error, req *pb.PublishMetadataReq
 		return errors.New("unmarshal metadata failed")
 	}
 
+	jsonBytes, _ := json.Marshal(metaData.ActualNodeMap)
+	b.Log.Debugf("meta data actual node map: %s", string(jsonBytes))
+
 	// update cluster node config
-	nodesWithPtr := b.CopyClusterNodesWithPtr(metaData.ActualNodeMap)
-	b.ClusterActualNodes = nodesWithPtr
+	b.ClusterActualNodes = metaData.ActualNodeMap
+
+	jsonBytes, _ = json.Marshal(b.ClusterActualNodes)
+	b.Log.Debugf("update cluster actual nodes to: %s", string(jsonBytes))
 
 	metaData.State = b.State
 	metaData.NodeConfig = *b.NodeConfig

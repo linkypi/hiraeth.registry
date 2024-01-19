@@ -69,12 +69,12 @@ func (net *Manager) GetConnectedNodeIds(clusterServers map[string]*config.NodeIn
 	return arr
 }
 
-func (net *Manager) GetConnectedNodes(clusterServers map[string]*config.NodeInfo) []config.NodeInfo {
+func (net *Manager) GetConnectedNodes(clusterServers map[string]config.NodeInfo) []config.NodeInfo {
 	arr := make([]config.NodeInfo, 0, 8)
 	for _, node := range clusterServers {
 		_, ok := net.Connections[node.Id]
 		if ok {
-			arr = append(arr, *node)
+			arr = append(arr, node)
 		}
 	}
 	return arr

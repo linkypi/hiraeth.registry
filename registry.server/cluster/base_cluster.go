@@ -37,10 +37,10 @@ type BaseCluster struct {
 	MetaData  MetaData
 
 	// all cluster nodes configured in the configuration
-	ClusterExpectedNodes map[string]*config.NodeInfo
+	ClusterExpectedNodes map[string]config.NodeInfo
 
 	// The actual cluster nodes
-	ClusterActualNodes map[string]*config.NodeInfo
+	ClusterActualNodes map[string]config.NodeInfo
 
 	OtherCandidateNodes []config.NodeInfo
 	joinCluster         bool
@@ -101,7 +101,7 @@ func (b *BaseCluster) GetOtherCandidateServers() []config.NodeInfo {
 	var filtered []config.NodeInfo
 	for _, node := range b.ClusterExpectedNodes {
 		if node.IsCandidate {
-			filtered = append(filtered, *node)
+			filtered = append(filtered, node)
 		}
 	}
 	return filtered
@@ -111,7 +111,7 @@ func (b *BaseCluster) GetOtherNodes(selfId string) []config.NodeInfo {
 	var filtered = make([]config.NodeInfo, 0, 8)
 	for _, node := range b.ClusterExpectedNodes {
 		if node.Id != selfId {
-			filtered = append(filtered, *node)
+			filtered = append(filtered, node)
 		}
 	}
 	return filtered
@@ -151,14 +151,6 @@ func (b *BaseCluster) GetNodeIdsIgnoreSelf(clusterServers []config.NodeInfo) []s
 	return arr
 }
 
-func (b *BaseCluster) CopyClusterNodesWithPtr(nodes map[string]config.NodeInfo) map[string]*config.NodeInfo {
-	var result = make(map[string]*config.NodeInfo)
-	for id, node := range nodes {
-		result[id] = &node
-	}
-	return result
-}
-
 func (b *BaseCluster) getNodesByRaftServers(servers []raft.Server) []config.NodeInfo {
 	var result = make([]config.NodeInfo, 0, len(servers))
 	for _, server := range servers {
@@ -167,7 +159,7 @@ func (b *BaseCluster) getNodesByRaftServers(servers []raft.Server) []config.Node
 				if server.Suffrage == raft.Voter {
 					node.IsCandidate = true
 				}
-				result = append(result, *node)
+				result = append(result, node)
 				break
 			}
 		}
@@ -212,8 +204,12 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 		// configuration in the node, or it may be a new node
 		msg := fmt.Sprintf("[cluster] remote node [%s][%s] not found int cluster servers, add it to cluster.", remoteNode.Id, remoteNode.Addr)
 		b.Log.Info(msg)
-		node = &remoteNode
+		node = remoteNode
 		b.ClusterExpectedNodes[remoteNode.Id] = node
+		b.ClusterActualNodes[remoteNode.Id] = node
+		if node.IsCandidate {
+			b.OtherCandidateNodes = append(b.OtherCandidateNodes, node)
+		}
 	} else {
 		if node.Addr != remoteNode.Addr {
 			msg := fmt.Sprintf("[cluster] update remote node info failed, node id exist, but addr not match: %s, %s, %s",
@@ -227,11 +223,9 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 		node.IsCandidate = remoteNode.IsCandidate
 		node.ExternalHttpPort = remoteNode.ExternalHttpPort
 		node.ExternalTcpPort = remoteNode.ExternalTcpPort
+		b.ClusterActualNodes[node.Id] = node
 	}
 
-	if node.IsCandidate {
-		b.OtherCandidateNodes = append(b.OtherCandidateNodes, *node)
-	}
 	b.Log.Infof("[cluster] update remote node info: %s, %s", remoteNode.Id, remoteNode.Addr)
 	return nil
 }

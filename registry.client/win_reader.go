@@ -8,7 +8,6 @@ import (
 	"github.com/panjf2000/gnet/pkg/pool/goroutine"
 	"google.golang.org/appengine/log"
 	"net"
-	"time"
 )
 
 type WinReader struct {
@@ -64,7 +63,7 @@ func (r *WinReader) Receive(shutdownCh chan struct{}, callback ReadCallBack) {
 			continue
 		}
 
-		_ = r.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		//_ = r.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		bytesRead, err := r.conn.Read(r.buffer)
 		if err != nil {
 			r.runCallback(callback, err)
