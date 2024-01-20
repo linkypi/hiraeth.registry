@@ -31,21 +31,16 @@ func (c *Client) Start(addr string) error {
 	return nil
 }
 
-type unixEventHandler struct {
-	gnet.EventServer
-	client *Client
-}
-
-func (h *unixEventHandler) OnOpened(c gnet.Conn) ([]byte, gnet.Action) {
+func (h *Client) OnOpened(c gnet.Conn) ([]byte, gnet.Action) {
 	c.SetContext(h.client.codec)
 	return nil, gnet.None
 }
 
-func (h *unixEventHandler) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
+func (h *Client) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
 	h.client.onReceive(frame, nil)
 	return
 }
-func (h *unixEventHandler) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
+func (h *Client) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 	return
 }
 
@@ -59,9 +54,7 @@ func CreateClientWithCodec(addr string, codec gnet.ICodec, shutdownCh chan struc
 		c.codec = &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
 	}
 
-	handler := unixEventHandler{}
-	handler.client = client
-	client.SetEventHandler(&handler)
+	c.eventHandler = &client
 
 	err := client.Start(addr)
 	if err != nil {

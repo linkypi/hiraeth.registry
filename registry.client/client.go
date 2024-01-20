@@ -70,11 +70,6 @@ func (c *Client) SetCodec(codec common.ICodec) {
 	c.codec = codec
 }
 
-// SetEventHandler For Linux, Darwin only, as for Windows system recommends using SetReadCallBack
-func (c *Client) SetEventHandler(handler gnet.EventHandler) {
-	c.eventHandler = handler
-}
-
 func (c *Client) RegisterAsync(serviceName, ip string, port int, callback func(response common.Response, err error)) error {
 	requestKey, err := c.register(serviceName, ip, port)
 	if err != nil {
