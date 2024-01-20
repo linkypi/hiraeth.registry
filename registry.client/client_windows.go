@@ -11,6 +11,48 @@ import (
 	"time"
 )
 
+type WinConn struct {
+	Conn
+	conn *net.TCPConn
+}
+
+func (w *WinConn) AsyncWrite(data []byte) error {
+	common.Log.Error("windows not support")
+	return errors.New("windows not support")
+}
+func (w *WinConn) Write(data []byte) (int, error) {
+	return w.conn.Write(data)
+}
+func (w *WinConn) Close() error {
+	return w.conn.Close()
+}
+
+func (w *WinConn) Read(buf []byte) (int, error) {
+	return w.conn.Read(buf)
+}
+func (w *WinConn) SetReadDeadline(time time.Time) error {
+	return w.conn.SetReadDeadline(time)
+}
+
+func CreateClient(addr string, shutdownCh chan struct{}, logger *logrus.Logger) (*Client, error) {
+	client := NewClient(4096, shutdownCh, logger)
+
+	client.SetReadCallBack(func(bytes []byte, conn net.Conn, err error) {
+		if err != nil {
+			client.onReceive(nil, err)
+			return
+		}
+		client.onReceive(bytes, nil)
+	})
+
+	err := client.Start(addr)
+	if err != nil {
+		client.Close()
+		return nil, err
+	}
+	return client, nil
+}
+
 func (c *Client) Start(addr string) error {
 	if _, ok := c.connMap[addr]; ok {
 		c.log.Debugf("connection already exists: %s", addr)
@@ -18,14 +60,14 @@ func (c *Client) Start(addr string) error {
 	}
 
 	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
-	winCon, err := CreatConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
+	con, err := CreateConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
 	if err != nil {
 		return err
 	}
 
 	c.addr = addr
-	c.connMap[addr] = &winCon
-	go c.checkConn(addr, &winCon)
+	c.connMap[addr] = &con
+	go c.checkConn(addr, &con)
 	return nil
 }
 
@@ -60,7 +102,7 @@ func (c *Client) checkConn(addr string, conn *Conn) {
 			c.log.Warnf("remote connection is closed, %v", stdErr)
 
 			// reconnect
-			newCon, err := CreatConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
+			newCon, err := CreateConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
 			if err != nil {
 				c.log.Warnf("reconnect to [%s] failed: %v", addr, err)
 				continue
@@ -84,10 +126,15 @@ func (c *Client) checkConn(addr string, conn *Conn) {
 
 var conLock sync.Map
 
-func CreatConn(addr string, readBufSize int, shutdownCh chan struct{}, readCallback ReadCallBack) (Conn, error) {
+func CreateConn(addr string, readBufSize int, shutdownCh chan struct{}, readCallback any) (Conn, error) {
 
 	if readBufSize <= 0 {
 		readBufSize = 1024 * 4
+	}
+
+	_, ok := readCallback.(ReadCallBack)
+	if !ok {
+		return nil, errors.New("readCallback must implement ReadCallBack")
 	}
 
 	if readCallback == nil {
@@ -122,27 +169,4 @@ func CreatConn(addr string, readBufSize int, shutdownCh chan struct{}, readCallb
 	go reader.Receive(shutdownCh, readCallback)
 
 	return &winConn, nil
-}
-
-type WinConn struct {
-	Conn
-	conn *net.TCPConn
-}
-
-func (w *WinConn) AsyncWrite(data []byte) error {
-	common.Log.Error("windows not support")
-	return errors.New("windows not support")
-}
-func (w *WinConn) Write(data []byte) (int, error) {
-	return w.conn.Write(data)
-}
-func (w *WinConn) Close() error {
-	return w.conn.Close()
-}
-
-func (w *WinConn) Read(buf []byte) (int, error) {
-	return w.conn.Read(buf)
-}
-func (w *WinConn) SetReadDeadline(time time.Time) error {
-	return w.conn.SetReadDeadline(time)
 }

@@ -73,7 +73,7 @@ func (s *Server) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
 }
 
 func (s *Server) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
-	s.log.Infof("client connection is closed, remote addr: %s, error: %s", c.RemoteAddr().String(), err.Error())
+	s.log.Infof("client connection is closed, remote addr: %s, error: %v", c.RemoteAddr().String(), err)
 	s.netManager.RemoveConn(c.RemoteAddr().String())
 	return
 }
@@ -131,8 +131,8 @@ func (s *Server) publishServiceChanged(connIds []string, serviceName string, ins
 }
 
 func (s *Server) OnShutdown(server gnet.Server) {
-	s.log.Errorf("client server shutting down")
-	s.Shutdown()
+	//s.log.Errorf("client server shutting down")
+	//s.Shutdown()
 }
 
 func (s *Server) Start(nodeId string) {
@@ -183,7 +183,7 @@ func (s *Server) startTcpServer(addr string) {
 	codec := gnet.NewLengthFieldBasedFrameCodec(common.EncoderConfig, common.DecoderConfig)
 	err := gnet.Serve(s, addr,
 		gnet.WithLogger(log.Log),
-		gnet.WithLogLevel(logging.DebugLevel),
+		gnet.WithLogLevel(logging.InfoLevel),
 		gnet.WithCodec(codec),
 		gnet.WithMulticore(true),
 		gnet.WithTCPNoDelay(gnet.TCPNoDelay),

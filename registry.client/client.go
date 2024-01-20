@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+type ReadCallBack func(bytes []byte, conn net.Conn, err error)
+
 type Client struct {
 	sync.Map
 	log          *logrus.Logger
@@ -55,6 +57,11 @@ func NewClient(readBufSize int, shutdownCh chan struct{}, log *logrus.Logger) *C
 	}
 
 	return client
+}
+
+func init() {
+	common.InitLogger("./logs", logrus.DebugLevel)
+	_ = common.InitSnowFlake("", 1)
 }
 
 // SetReadCallBack Only for Windows, as for Linux, the darwin system recommends using SetEventHandler
@@ -383,7 +390,30 @@ func (c *Client) subscribe(serviceName string) (string, error) {
 	return c.sendRequest(connKey, common.Subscribe, &subRequest)
 }
 
-func (c *Client) onReceive(bytes []byte, conn net.Conn, err error) {
+func (c *Client) Close() {
+	if c.connMap != nil {
+		for id, cn := range c.connMap {
+			err := (*cn).Close()
+			if err != nil {
+				c.log.Errorf("failed to close server connection: %s, %v", id, err)
+			}
+		}
+	}
+}
+
+func (c *Client) checkConnection(serverId, addr string) (string, error) {
+	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
+	if _, ok := c.connMap[addr]; !ok {
+		conn, err := CreateConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
+		if err != nil {
+			return "", err
+		}
+		c.connMap[addr] = &conn
+	}
+	return addr, nil
+}
+
+func (c *Client) onReceive(bytes []byte, err error) {
 	if err != nil {
 		c.log.Errorf("failed to receive data: %v", err)
 		return
@@ -419,27 +449,4 @@ func (c *Client) onReceive(bytes []byte, conn net.Conn, err error) {
 		c.log.Errorf("invalid msg: %v", err)
 		return
 	}
-}
-
-func (c *Client) Close() {
-	if c.connMap != nil {
-		for id, cn := range c.connMap {
-			err := (*cn).Close()
-			if err != nil {
-				c.log.Errorf("failed to close server connection: %s, %v", id, err)
-			}
-		}
-	}
-}
-
-func (c *Client) checkConnection(serverId, addr string) (string, error) {
-	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
-	if _, ok := c.connMap[addr]; !ok {
-		conn, err := CreatConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
-		if err != nil {
-			return "", err
-		}
-		c.connMap[addr] = &conn
-	}
-	return addr, nil
 }

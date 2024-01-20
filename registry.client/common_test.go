@@ -3,15 +3,21 @@ package client
 import (
 	pb "github.com/linkypi/hiraeth.registry/client/proto"
 	"github.com/linkypi/hiraeth.registry/common"
-	"github.com/sirupsen/logrus"
-	"net"
 	"testing"
 	"time"
 )
 
 func TestAsyncRegisterUsingTcp(t *testing.T) {
+
+	//termCh := make(chan os.Signal, 1)
+	//signal.Notify(termCh, os.Interrupt, syscall.SIGKILL, syscall.SIGQUIT, syscall.SIGTERM)
+	//go func() {
+	//	<-termCh
+	//	common.Log.Errorf("app closed with signal")
+	//	os.Exit(0)
+	//}()
 	shutdownCh := make(chan struct{})
-	client := initClient(t, "localhost:22662", shutdownCh)
+	client := initClient("localhost:22662", shutdownCh)
 	registerAsync("my-service", "127.0.0.1", 7380, client)
 	select {
 	case <-shutdownCh:
@@ -24,7 +30,7 @@ func TestAsyncRegisterUsingTcp(t *testing.T) {
 
 func TestAsyncRegisterUsingTcp2(t *testing.T) {
 	shutdownCh := make(chan struct{})
-	client := initClient(t, "localhost:22662", shutdownCh)
+	client := initClient("localhost:22662", shutdownCh)
 	registerAsync("my-service", "127.0.0.1", 9090, client)
 	select {
 	case <-shutdownCh:
@@ -37,7 +43,7 @@ func TestAsyncRegisterUsingTcp2(t *testing.T) {
 
 func TestSubscribe(t *testing.T) {
 	shutdownCh := make(chan struct{})
-	client := initClient(t, "localhost:22662", shutdownCh)
+	client := initClient("localhost:22662", shutdownCh)
 	res, err := client.Subscribe("my-service", time.Second*10)
 	if err != nil {
 		t.Errorf("subscribe error: %v", err)
@@ -75,15 +81,14 @@ func registerAsync(serviceName, ip string, port int, client *Client) {
 	})
 }
 
-func initClient(t *testing.T, serverAddr string, shutdownCh chan struct{}) *Client {
-	common.InitLogger("./log", logrus.DebugLevel)
-	_ = common.InitSnowFlake("", 1)
-	logger := common.Log
+func initClient(serverAddr string, shutdownCh chan struct{}) *Client {
 
-	client, err := createClient(serverAddr, shutdownCh, logger)
+	logger := common.Log
+	client, err := CreateClient(serverAddr, shutdownCh, logger)
 	if err != nil {
 		close(shutdownCh)
-		t.Fatal(err)
+		logger.Error("failed to create client", err)
+		panic(err)
 	}
 
 	defer func() {
@@ -97,7 +102,7 @@ func initClient(t *testing.T, serverAddr string, shutdownCh chan struct{}) *Clie
 
 func TestSyncRegisterUsingTcp(t *testing.T) {
 	shutdownCh := make(chan struct{})
-	client := initClient(t, "localhost:22662", shutdownCh)
+	client := initClient("localhost:22662", shutdownCh)
 	res, err := client.Register("my-service", "127.0.0.1", 2345, time.Second*30)
 	if err != nil {
 		close(shutdownCh)
@@ -129,21 +134,4 @@ func getRegResponse(t *testing.T, err error, res common.Response, shutdownCh cha
 		return nil
 	}
 	return &resData
-}
-
-func createClient(addr string, shutdownCh chan struct{}, logger *logrus.Logger) (*Client, error) {
-	client := NewClient(4096, shutdownCh, logger)
-	client.SetReadCallBack(func(bytes []byte, conn net.Conn, err error) {
-		if err != nil {
-			client.onReceive(nil, conn, err)
-			return
-		}
-		client.onReceive(bytes, conn, nil)
-	})
-	err := client.Start(addr)
-	if err != nil {
-		client.Close()
-		return nil, nil
-	}
-	return client, nil
 }

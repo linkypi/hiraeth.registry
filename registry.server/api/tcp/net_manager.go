@@ -45,7 +45,14 @@ func (net *NetManager) AddConn(c gnet.Conn) {
 }
 
 func (net *NetManager) RemoveConn(addr string) {
-	net.connections.Delete(addr)
+	conn, ok := net.connections.Load(addr)
+	if ok {
+		err := (conn.(gnet.Conn)).Close()
+		if err != nil {
+			net.log.Warnf("failed to close conn: %s, %v", addr, err)
+		}
+		net.connections.Delete(addr)
+	}
 	net.log.Infof("remove client connection %s.", addr)
 }
 

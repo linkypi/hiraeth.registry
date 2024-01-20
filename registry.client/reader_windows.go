@@ -44,8 +44,6 @@ func (r *WinReader) init() {
 	r.lengthFieldLength = common.DecoderConfig.LengthFieldLength
 }
 
-type ReadCallBack func(bytes []byte, conn net.Conn, err error)
-
 func (r *WinReader) Receive(shutdownCh chan struct{}, callback ReadCallBack) {
 
 	for {
