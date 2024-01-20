@@ -50,6 +50,7 @@ func CreateClient(addr string, shutdownCh chan struct{}, logger *logrus.Logger) 
 
 func CreateClientWithCodec(addr string, codec gnet.ICodec, shutdownCh chan struct{}, logger *logrus.Logger) (*Client, error) {
 	client := NewClient(4096, shutdownCh, logger)
+	client.codec = codec
 	if c.codec == nil {
 		c.codec = &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
 	}
