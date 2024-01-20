@@ -309,15 +309,6 @@ func Encode(obj any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func DecodeToMessage(buffer []byte) (*Message, error) {
-	buf := bytes.NewBuffer(buffer)
-	msg := &Message{}
-	if err := binary.Read(buf, binary.BigEndian, msg); err != nil {
-		return nil, err
-	}
-	return msg, nil
-}
-
 // ReadMessageLengthFromHeader Read the message length, which is usually fixed at 4 bytes
 func ReadMessageLengthFromHeader(bytes []byte, len int) int {
 	return int(binary.BigEndian.Uint32(bytes[0:len]))
