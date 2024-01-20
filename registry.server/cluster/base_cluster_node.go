@@ -299,6 +299,7 @@ func (b *BaseCluster) ConnectToNode(remoteNode config.NodeInfo) {
 		PermitWithoutStream: true,
 	}
 
+	printTime := time.Now()
 	for {
 		select {
 		case <-b.ShutDownCh:
@@ -330,7 +331,11 @@ func (b *BaseCluster) ConnectToNode(remoteNode config.NodeInfo) {
 		}
 
 		time.Sleep(5 * time.Second)
-		b.Log.Debugf("[heartbeat] waiting for %s:%s to be ready", remoteNode.Id, remoteNode.Addr)
+
+		if time.Now().Sub(printTime).Seconds() > 30 {
+			b.Log.Warnf("[heartbeat] waiting for %s:%s to be ready", remoteNode.Id, remoteNode.Addr)
+			printTime = time.Now()
+		}
 	}
 }
 

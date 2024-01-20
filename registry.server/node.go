@@ -2,12 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/linkypi/hiraeth.registry/common"
 	"github.com/linkypi/hiraeth.registry/server/api/http"
 	"github.com/linkypi/hiraeth.registry/server/api/tcp"
 	"github.com/linkypi/hiraeth.registry/server/cluster"
 	"github.com/linkypi/hiraeth.registry/server/cluster/network"
 	"github.com/linkypi/hiraeth.registry/server/cluster/rpc"
-	"github.com/linkypi/hiraeth.registry/server/common"
 	"github.com/linkypi/hiraeth.registry/server/config"
 	"github.com/linkypi/hiraeth.registry/server/log"
 	pb "github.com/linkypi/hiraeth.registry/server/proto"
@@ -15,6 +15,8 @@ import (
 	"github.com/linkypi/hiraeth.registry/server/slot"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/reflection"
 	"net"
 	"os"
 	"time"
@@ -54,8 +56,8 @@ func (n *Node) Start(conf config.Config) {
 	// since grpc will enter a loop after starting
 	// we need to use a channel to notify grpcServer
 	// has assigned if it has been started
-	rpcServerCh := make(chan *common.GrpcServer)
-	go common.StartGRPCServer(n.selfNode.Addr, n.shutDownCh, rpcServerCh, func(server *grpc.Server) {
+	rpcServerCh := make(chan *GrpcServer)
+	go StartGRPCServer(n.selfNode.Addr, n.shutDownCh, rpcServerCh, func(server *grpc.Server) {
 		RegisterPeerRpcService(server, n.rpcService, n.Network)
 	})
 
@@ -93,7 +95,10 @@ func (n *Node) Start(conf config.Config) {
 }
 
 func (n *Node) startClientReceiver(conf config.Config, myCluster *cluster.Cluster, slotManager *slot.Manager) {
-	clientTcpServer := tcp.NewClientTcpServer(n.selfNode.GetExternalTcpAddr(),
+
+	codec := &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
+
+	clientTcpServer := tcp.NewClientTcpServer(n.selfNode.GetExternalTcpAddr(), codec,
 		myCluster, conf.StartupMode, slotManager, n.shutDownCh)
 	go clientTcpServer.Start(n.selfNode.Id)
 
@@ -117,4 +122,77 @@ func (n *Node) Shutdown() {
 	time.Sleep(time.Second)
 	n.log.Info("server is down gracefully.")
 	os.Exit(0)
+}
+
+type GrpcServer struct {
+	Server *grpc.Server
+	Socket net.Listener
+}
+
+var defaultEnforcementPolicy = keepalive.EnforcementPolicy{
+	MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
+	PermitWithoutStream: true,            // Allow pings even when there are no active streams
+}
+
+var defaultKeepaliveServerParameters = keepalive.ServerParameters{
+	// If a client is idle for 15 seconds, send a GOAWAY
+	MaxConnectionIdle: 15 * time.Second,
+	// If any connection is alive for more than 30 seconds, send a GOAWAY
+	MaxConnectionAge: 30 * time.Second,
+	// Allow 5 seconds for pending RPCs to complete before forcibly closing connections
+	MaxConnectionAgeGrace: 5 * time.Second,
+	// Ping the client if it is idle for 5 seconds to ensure the connection is still active
+	Time: 5 * time.Second,
+	// Wait 1 second for the ping ack before assuming the connection is dead
+	Timeout: 1 * time.Second,
+}
+
+func StartGRPCServer(addr string, shutDownCh chan struct{}, serverCh chan *GrpcServer, register func(*grpc.Server)) {
+	sock, err := net.Listen("tcp", addr)
+	if err != nil {
+		common.Log.Errorf("failed to listen: %v", err)
+		close(shutDownCh)
+		return
+	}
+
+	grpcServer := grpc.NewServer(grpc.KeepaliveEnforcementPolicy(defaultEnforcementPolicy),
+		grpc.KeepaliveParams(defaultKeepaliveServerParameters))
+	reflection.Register(grpcServer)
+	register(grpcServer)
+	// notify if grpcServer has been created
+	serverCh <- &GrpcServer{
+		Server: grpcServer,
+		Socket: sock,
+	}
+
+	// start grpc server，enter an infinite loop after the startup is complete
+	if err := grpcServer.Serve(sock); err != nil {
+		common.Log.Errorf("grpc server failed to serve: %v", err)
+		close(shutDownCh)
+	}
+}
+
+func StartGRPCServerWithParameters(addr string, knp keepalive.EnforcementPolicy, ksp keepalive.ServerParameters,
+	shutDownCh chan struct{}, serverCh chan *GrpcServer) {
+	sock, err := net.Listen("tcp", addr)
+	if err != nil {
+		common.Log.Errorf("failed to listen: %v", err)
+		close(shutDownCh)
+		return
+	}
+
+	grpcServer := grpc.NewServer(grpc.KeepaliveEnforcementPolicy(knp), grpc.KeepaliveParams(ksp))
+	reflection.Register(grpcServer)
+
+	// notify if grpcServer has been created
+	serverCh <- &GrpcServer{
+		Server: grpcServer,
+		Socket: sock,
+	}
+
+	// start grpc server，enter an infinite loop after the startup is complete
+	if err := grpcServer.Serve(sock); err != nil {
+		common.Log.Errorf("grpc server failed to serve: %v", err)
+		close(shutDownCh)
+	}
 }

@@ -209,6 +209,7 @@ func (net *Manager) CloseConn(nodeId string) error {
 }
 
 func (net *Manager) CheckConnClosed(shutDownCh chan struct{}, reconnect func(string)) {
+	lastLogTime := time.Now()
 	for {
 		select {
 		case <-shutDownCh:
@@ -221,7 +222,11 @@ func (net *Manager) CheckConnClosed(shutDownCh chan struct{}, reconnect func(str
 				continue
 			}
 			state := con.grpcConn.GetState()
-			net.log.Debugf("Connection state for %s: %s", id, state.String())
+
+			if time.Now().Sub(lastLogTime).Seconds() > 30 {
+				lastLogTime = time.Now()
+				net.log.Debugf("connection state for %s: %s", id, state.String())
+			}
 
 			if state == connectivity.TransientFailure || state == connectivity.Shutdown {
 				net.log.Warnf("Connection to node %s is closed or in transient failure state.", id)

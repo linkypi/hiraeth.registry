@@ -9,28 +9,28 @@ import (
 	"github.com/panjf2000/gnet/pkg/pool/goroutine"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
-	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-type ReadCallBack func(bytes []byte, conn net.Conn, err error)
-
 type Client struct {
 	sync.Map
-	log          *logrus.Logger
-	pool         *goroutine.Pool
-	shutdownCh   chan struct{}
-	connMap      map[string]*Conn
-	addr         string
-	readBufSize  int
-	readCallback ReadCallBack
+	log         *logrus.Logger
+	pool        *goroutine.Pool
+	shutdownCh  chan struct{}
+	connMap     map[string]*Conn
+	addr        string
+	readBufSize int
+
+	// just for linux
 	eventHandler gnet.EventHandler
 
 	shards       map[string]common.Shard
 	clusterNodes map[string]string
+
+	codec common.ICodec
 
 	turnOnServiceSubs bool
 	serviceInstances  []common.ServiceInstance
@@ -39,6 +39,7 @@ type Client struct {
 	ip          string
 	port        int
 }
+
 type Conn interface {
 	Read([]byte) (int, error)
 	SetReadDeadline(time time.Time) error
@@ -48,6 +49,7 @@ type Conn interface {
 }
 
 func NewClient(readBufSize int, shutdownCh chan struct{}, log *logrus.Logger) *Client {
+
 	client := &Client{
 		log:         log,
 		connMap:     make(map[string]*Conn),
@@ -64,9 +66,8 @@ func init() {
 	_ = common.InitSnowFlake("", 1)
 }
 
-// SetReadCallBack Only for Windows, as for Linux, the darwin system recommends using SetEventHandler
-func (c *Client) SetReadCallBack(readCallback ReadCallBack) {
-	c.readCallback = readCallback
+func (c *Client) SetCodec(codec common.ICodec) {
+	c.codec = codec
 }
 
 // SetEventHandler For Linux, Darwin only, as for Windows system recommends using SetReadCallBack
@@ -105,9 +106,6 @@ func (c *Client) sendHeartbeatsInPeriod() {
 			requestKey, err := c.sendHeartbeat(c.serviceName, c.ip, c.port)
 			if err != nil {
 				c.log.Errorf("failed to send heartbeat: %v", err)
-				if strings.Contains(err.Error(), "connection refused") {
-
-				}
 			}
 
 			c.asyncWait(requestKey, func(a any, err error) {
@@ -203,6 +201,10 @@ func (c *Client) fetchMetadata() error {
 	response, err := c.FetchMetadata()
 	if err != nil {
 		c.log.Errorf("failed to fetch metadata: %v", err)
+		return err
+	}
+	if !response.Success {
+		c.log.Errorf("failed to fetch metadata: %v", response.Msg)
 		return err
 	}
 	var metadata pb.FetchMetadataResponse
@@ -404,7 +406,7 @@ func (c *Client) Close() {
 func (c *Client) checkConnection(serverId, addr string) (string, error) {
 	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
 	if _, ok := c.connMap[addr]; !ok {
-		conn, err := CreateConn(addr, c.readBufSize, c.shutdownCh, c.readCallback)
+		conn, err := c.createConn(addr)
 		if err != nil {
 			return "", err
 		}

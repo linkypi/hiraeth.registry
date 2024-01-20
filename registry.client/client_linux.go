@@ -21,7 +21,7 @@ func (c *Client) Start(addr string) error {
 	}
 
 	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
-	con, err := CreateConn(addr, c.readBufSize, nil, c.eventHandler)
+	con, err := CreateConn(addr, c.readBufSize, nil, c.codec, c.eventHandler)
 	if err != nil {
 		return err
 	}
@@ -37,8 +37,7 @@ type unixEventHandler struct {
 }
 
 func (h *unixEventHandler) OnOpened(c gnet.Conn) ([]byte, gnet.Action) {
-	codec := common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
-	c.SetContext(codec)
+	c.SetContext(h.client.codec)
 	return nil, gnet.None
 }
 
@@ -51,7 +50,15 @@ func (h *unixEventHandler) OnClosed(c gnet.Conn, err error) (action gnet.Action)
 }
 
 func CreateClient(addr string, shutdownCh chan struct{}, logger *logrus.Logger) (*Client, error) {
+	return CreateClientWithCodec(addr, nil, shutdownCh, logger)
+}
+
+func CreateClientWithCodec(addr string, codec gnet.ICodec, shutdownCh chan struct{}, logger *logrus.Logger) (*Client, error) {
 	client := NewClient(4096, shutdownCh, logger)
+	if c.codec == nil {
+		c.codec = &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
+	}
+
 	handler := unixEventHandler{}
 	handler.client = client
 	client.SetEventHandler(&handler)
@@ -88,13 +95,12 @@ func (g *GConn) SetReadDeadline(time time.Time) error {
 	return errors.New("not support")
 }
 
-func CreateConn(addr string, readBufSize int, _ chan struct{}, handler any) (Conn, error) {
+func CreateConn(addr string, readBufSize int, _ chan struct{}, codec gnet.ICodec, handler any) (Conn, error) {
 	eventHandler, ok := handler.(gnet.EventHandler)
 	if !ok {
 		return nil, errors.New("handler must implement all the interface of gnet.EventHandler")
 	}
 
-	codec := &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
 	client, err := gnet.NewClient(
 		eventHandler,
 		gnet.WithLogger(common.Log),

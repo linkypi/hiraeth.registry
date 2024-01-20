@@ -90,6 +90,7 @@ func (c *Cluster) handleClusterDowntime() {
 
 func (c *Cluster) monitoringClusterState() {
 	detectDownTimes := 1
+	c.lastStateTime = time.Now()
 	for {
 		select {
 		// only be notified when a new leader is generated
@@ -113,7 +114,12 @@ func (c *Cluster) monitoringClusterState() {
 func (c *Cluster) detectClusterState(detectDownTimes *int) {
 	stats := c.Raft.Stats()
 	state := stats["state"]
-	c.Log.Debugf(" node state [%s]", state)
+
+	seconds := time.Now().Sub(c.lastStateTime).Seconds()
+	if seconds > 30 {
+		c.Log.Debugf(" node state [%s]", state)
+		c.lastStateTime = time.Now()
+	}
 
 	if state != string(c.SelfNode.State) {
 		c.SelfNode.State = config.NodeState(state)

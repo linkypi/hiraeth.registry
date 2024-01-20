@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type BaseCluster struct {
@@ -33,8 +34,9 @@ type BaseCluster struct {
 	SelfNode    *config.NodeInfo
 	notifyCh    chan bool
 
-	ClusterId uint64
-	MetaData  MetaData
+	lastStateTime time.Time
+	ClusterId     uint64
+	MetaData      MetaData
 
 	// all cluster nodes configured in the configuration
 	ClusterExpectedNodes map[string]config.NodeInfo

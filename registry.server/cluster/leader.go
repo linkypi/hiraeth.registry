@@ -99,7 +99,7 @@ func (l *Leader) removeInvalidServerInCluster(actualClusterNodes []config.NodeIn
 			l.Log.Debugf("[cluster] failed to remove server %s from raft cluster, err: %v", s, err)
 			continue
 		}
-		l.Log.Infof("[cluster] removed invalid node %s in raft", s)
+		l.Log.Warnf("[cluster] removed invalid node %s in raft", s)
 	}
 
 	for _, an := range l.ClusterActualNodes {
