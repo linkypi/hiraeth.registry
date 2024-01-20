@@ -69,6 +69,8 @@ func (s *Server) OnInitComplete(srv gnet.Server) (action gnet.Action) {
 func (s *Server) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
 	s.log.Infof("connected to client: %s", c.RemoteAddr().String())
 	s.netManager.AddConn(c)
+
+	c.SetContext(common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion})
 	return
 }
 
@@ -85,6 +87,8 @@ func (s *Server) Tick() (delay time.Duration, action gnet.Action) {
 }
 
 func (s *Server) React(buffer []byte, c gnet.Conn) (out []byte, action gnet.Action) {
+
+	c.SetContext(common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion})
 	data := append([]byte{}, buffer...)
 	msgType := data[0]
 	data = data[1:]
@@ -180,7 +184,7 @@ func (s *Server) startTcpServer(addr string) {
 		}
 	}()
 
-	codec := gnet.NewLengthFieldBasedFrameCodec(common.EncoderConfig, common.DecoderConfig)
+	codec := &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
 	err := gnet.Serve(s, addr,
 		gnet.WithLogger(log.Log),
 		gnet.WithLogLevel(logging.InfoLevel),

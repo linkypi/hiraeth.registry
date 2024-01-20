@@ -54,7 +54,10 @@ func (b *BuildInFixedLengthCodec) Decode(c gnet.Conn) ([]byte, error) {
 	headerLen := DefaultHeadLength // uint16 + uint32
 
 	size, header := c.ReadN(headerLen)
-	if size == headerLen {
+	if size == 0 {
+		return nil, gerr.ErrIncompletePacket
+	}
+	if size < headerLen {
 		Log.Warnf("not enough header data len: %d", size)
 		return nil, gerr.ErrIncompletePacket
 	}

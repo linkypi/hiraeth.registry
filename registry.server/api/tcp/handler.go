@@ -33,7 +33,7 @@ func (s *Server) handleRequest(startCh chan struct{}) {
 }
 
 func (s *Server) handle(wrapper RequestWrapper) {
-	s.log.Warnf("received request, msg type: %s", wrapper.MsgType.String())
+	s.log.Debugf("received request, msg type: %s", wrapper.MsgType.String())
 	if wrapper.MsgType == common.RequestMsg {
 		var req common.Request
 		err := common.Decode(wrapper.Data, &req)
@@ -89,5 +89,5 @@ func (s *Server) doHandle(handler handler.RequestHandler, request common.Request
 	if err != nil {
 		s.log.Errorf("async send message error, msg: %s, %v", jsonStr, err)
 	}
-	s.log.Warnf("reply client request: %s, bytes: %d", request.RequestType.String(), len(bytes))
+	s.log.Debugf("reply client request: %s, bytes: %d", request.RequestType.String(), len(bytes))
 }

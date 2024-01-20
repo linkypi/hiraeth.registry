@@ -201,11 +201,6 @@ func (obj *Request) ToBytes() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Appends the message length to the message header, typically 4 bytes
-	byes, err = appendDataLenToHeader(byes)
-	if err != nil {
-		return nil, err
-	}
 	return byes, nil
 }
 
@@ -215,11 +210,6 @@ func (obj *Response) ToBytes() ([]byte, error) {
 		return nil, err
 	}
 	byes, err = appendMsgTypeToHeader(ResponseMsg, byes)
-	if err != nil {
-		return nil, err
-	}
-	// Appends the message length to the message header, typically 4 bytes
-	byes, err = appendDataLenToHeader(byes)
 	if err != nil {
 		return nil, err
 	}
@@ -240,11 +230,7 @@ func BuildRequestToBytes(requestType RequestType, payload proto.Message) (uint64
 	if err != nil {
 		return 0, nil, err
 	}
-	// Appends the message length to the message header, typically 4 bytes
-	byes, err = appendDataLenToHeader(byes)
-	if err != nil {
-		return 0, nil, err
-	}
+
 	return request.RequestId, byes, nil
 }
 
@@ -259,11 +245,6 @@ func BuildResponseToBytes(requestId uint64, payload proto.Message) ([]byte, erro
 		return nil, err
 	}
 	byes, err = appendMsgTypeToHeader(ResponseMsg, byes)
-	if err != nil {
-		return nil, err
-	}
-	// Appends the message length to the message header, typically 4 bytes
-	byes, err = appendDataLenToHeader(byes)
 	if err != nil {
 		return nil, err
 	}

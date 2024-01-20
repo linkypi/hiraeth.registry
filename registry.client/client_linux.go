@@ -4,12 +4,14 @@ package client
 
 import (
 	"errors"
-	"github.com/linkypi/hiraeth.registry/common"
+	"strings"
+	"time"
+
 	"github.com/panjf2000/gnet"
 	"github.com/panjf2000/gnet/pkg/logging"
 	"github.com/sirupsen/logrus"
-	"strings"
-	"time"
+
+	"github.com/linkypi/hiraeth.registry/common"
 )
 
 func (c *Client) Start(addr string) error {
@@ -32,6 +34,12 @@ func (c *Client) Start(addr string) error {
 type unixEventHandler struct {
 	gnet.EventServer
 	client *Client
+}
+
+func (h *unixEventHandler) OnOpened(c gnet.Conn) ([]byte, gnet.Action) {
+	codec := common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
+	c.SetContext(codec)
+	return nil, gnet.None
 }
 
 func (h *unixEventHandler) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
@@ -85,7 +93,8 @@ func CreateConn(addr string, readBufSize int, _ chan struct{}, handler any) (Con
 	if !ok {
 		return nil, errors.New("handler must implement all the interface of gnet.EventHandler")
 	}
-	codec := gnet.NewLengthFieldBasedFrameCodec(common.EncoderConfig, common.DecoderConfig)
+
+	codec := &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
 	client, err := gnet.NewClient(
 		eventHandler,
 		gnet.WithLogger(common.Log),

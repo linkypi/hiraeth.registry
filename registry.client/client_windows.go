@@ -4,11 +4,12 @@ package client
 
 import (
 	"errors"
-	"github.com/linkypi/hiraeth.registry/common"
 	"net"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/linkypi/hiraeth.registry/common"
 )
 
 type WinConn struct {
