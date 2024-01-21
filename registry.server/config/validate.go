@@ -1,9 +1,9 @@
 package config
 
 import (
+	"github.com/linkypi/hiraeth.registry/common"
 	"os"
 	"regexp"
-	"strings"
 )
 
 func validateIP(ip, key string, opts []kv) any {
@@ -33,21 +33,13 @@ func ParseByDefaultOpts(val, key string, opts []kv) any {
 	return nil
 }
 
-func parseClusterServers(ctrlCandidateServers, key string, opts []kv) any {
-	parts := strings.Split(ctrlCandidateServers, ",")
-	clusterServers := make([]string, len(parts))
-
-	clusterRegexCompile := regexp.MustCompile("(\\d+):(\\d+\\.\\d+\\.\\d+\\.\\d+):(\\d+)")
-
-	for index, part := range parts {
-		match := clusterRegexCompile.MatchString(part)
-		if !match {
-			log.Error("property " + ClusterServerAddr + " value is invalid: " + part)
-			os.Exit(1)
-		}
-		clusterServers[index] = part
+func parseClusterServers(addrs, key string, opts []kv) any {
+	servers, ok := common.ParseClusterServers(addrs)
+	if !ok {
+		log.Error("property " + ClusterServerAddr + " value is invalid: " + addrs)
+		os.Exit(1)
 	}
-	return clusterServers
+	return servers
 }
 
 func validateNumber(id, key string, opts []kv) any {

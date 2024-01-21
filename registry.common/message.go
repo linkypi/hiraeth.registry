@@ -49,6 +49,7 @@ const (
 	Heartbeat
 	Register
 	Subscribe
+	UnSubscribe
 	PublishServiceChanged
 	FetchMetadata
 	FetchServiceInstance

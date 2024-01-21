@@ -13,10 +13,6 @@ type FetchServiceInstanceHandler struct {
 	ServiceImpl *ServiceImpl
 }
 
-func (r *FetchServiceInstanceHandler) getRequestType() common.RequestType {
-	return common.FetchServiceInstance
-}
-
 func (r *FetchServiceInstanceHandler) Handle(req common.Request, con gnet.Conn) common.Response {
 	request := pb.FetchServiceRequest{}
 	err := proto.Unmarshal(req.Payload, &request)

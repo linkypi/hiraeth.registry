@@ -8,7 +8,6 @@ import (
 
 type RequestHandler interface {
 	Handle(req common.Request, con gnet.Conn) common.Response
-	getRequestType() common.RequestType
 }
 
 type RequestHandlerFactory struct {
@@ -33,7 +32,7 @@ func NewHandlerFactory(serviceImpl *ServiceImpl, log *logrus.Logger) RequestHand
 	}
 
 	requestHandlerFactory.handlers[common.Register] = &RegisterHandler{Log: log, ServiceImpl: serviceImpl}
-	requestHandlerFactory.handlers[common.Subscribe] = &SubscribeHandler{Log: log, ServiceImpl: serviceImpl}
+	requestHandlerFactory.handlers[common.Subscribe] = &SubHandler{Log: log, ServiceImpl: serviceImpl}
 	requestHandlerFactory.handlers[common.Heartbeat] = &HeartbeatHandler{Log: log, ServiceImpl: serviceImpl}
 	requestHandlerFactory.handlers[common.FetchServiceInstance] = &FetchServiceInstanceHandler{Log: log, ServiceImpl: serviceImpl}
 	requestHandlerFactory.handlers[common.FetchMetadata] = &FetchMetadataHandler{Log: log, ServiceImpl: serviceImpl}

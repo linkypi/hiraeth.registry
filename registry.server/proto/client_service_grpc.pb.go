@@ -33,7 +33,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ClientServiceClient interface {
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
-	SubScribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	SubScribe(ctx context.Context, in *SubRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	PublishServiceChanged(ctx context.Context, in *ServiceChangedRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	FetchServiceInstances(ctx context.Context, in *FetchServiceRequest, opts ...grpc.CallOption) (*FetchServiceResponse, error)
 	FetchMetadata(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*FetchMetadataResponse, error)
@@ -57,7 +57,7 @@ func (c *clientServiceClient) Register(ctx context.Context, in *RegisterRequest,
 	return out, nil
 }
 
-func (c *clientServiceClient) SubScribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+func (c *clientServiceClient) SubScribe(ctx context.Context, in *SubRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, ClientService_SubScribe_FullMethodName, in, out, opts...)
 	if err != nil {
@@ -107,7 +107,7 @@ func (c *clientServiceClient) SendHeartbeat(ctx context.Context, in *HeartbeatRe
 // for forward compatibility
 type ClientServiceServer interface {
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
-	SubScribe(context.Context, *SubscribeRequest) (*emptypb.Empty, error)
+	SubScribe(context.Context, *SubRequest) (*emptypb.Empty, error)
 	PublishServiceChanged(context.Context, *ServiceChangedRequest) (*emptypb.Empty, error)
 	FetchServiceInstances(context.Context, *FetchServiceRequest) (*FetchServiceResponse, error)
 	FetchMetadata(context.Context, *emptypb.Empty) (*FetchMetadataResponse, error)
@@ -121,7 +121,7 @@ type UnimplementedClientServiceServer struct {
 func (UnimplementedClientServiceServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Register not implemented")
 }
-func (UnimplementedClientServiceServer) SubScribe(context.Context, *SubscribeRequest) (*emptypb.Empty, error) {
+func (UnimplementedClientServiceServer) SubScribe(context.Context, *SubRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SubScribe not implemented")
 }
 func (UnimplementedClientServiceServer) PublishServiceChanged(context.Context, *ServiceChangedRequest) (*emptypb.Empty, error) {
@@ -167,7 +167,7 @@ func _ClientService_Register_Handler(srv interface{}, ctx context.Context, dec f
 }
 
 func _ClientService_SubScribe_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SubscribeRequest)
+	in := new(SubRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -179,7 +179,7 @@ func _ClientService_SubScribe_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: ClientService_SubScribe_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ClientServiceServer).SubScribe(ctx, req.(*SubscribeRequest))
+		return srv.(ClientServiceServer).SubScribe(ctx, req.(*SubRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

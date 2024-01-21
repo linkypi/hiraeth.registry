@@ -6,7 +6,7 @@ import "error_type.proto";
 
 service ClientService {
   rpc Register(RegisterRequest) returns (RegisterResponse) {}
-  rpc SubScribe(SubscribeRequest)returns(google.protobuf.Empty){}
+  rpc SubScribe(SubRequest)returns(google.protobuf.Empty){}
   rpc PublishServiceChanged(ServiceChangedRequest)returns(google.protobuf.Empty){}
   rpc FetchServiceInstances(FetchServiceRequest)returns(FetchServiceResponse){}
   rpc FetchMetadata(google.protobuf.Empty)returns(FetchMetadataResponse){}
@@ -16,6 +16,7 @@ service ClientService {
 message FetchMetadataResponse {
   string shards = 1;
   map<string, string> nodes = 2;
+  ErrorType errorType = 3;
 }
 message RegisterRequest {
   string serviceName = 1;
@@ -26,8 +27,14 @@ message RegisterResponse {
   ErrorType errorType = 1;
   bool success = 2;
 }
-message SubscribeRequest {
-  string serviceName = 1;
+enum SubType {
+  NoneSubPub = 0;
+  Subscribe = 1;
+  UnSubscribe = 2;
+}
+message SubRequest {
+  SubType subType = 1;
+  string serviceName = 2;
 }
 message ServiceChangedRequest {
   string serviceName = 1;

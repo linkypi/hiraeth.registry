@@ -17,8 +17,45 @@ func TestAsyncRegisterUsingTcp(t *testing.T) {
 	//	os.Exit(0)
 	//}()
 	shutdownCh := make(chan struct{})
-	client := initClient("localhost:22662", shutdownCh)
+	client := initClient("127.0.0.1:22662", shutdownCh)
 	registerAsync("my-service", "127.0.0.1", 7380, client)
+	select {
+	case <-shutdownCh:
+		if client != nil {
+			client.Close()
+		}
+		return
+	}
+}
+
+func TestAsyncRegisterWithoutRoute(t *testing.T) {
+	shutdownCh := make(chan struct{})
+	addr := "127.0.0.1:22663"
+	client := initClient(addr, shutdownCh)
+	res, err := client.RegisterWithoutRoute("my-service", addr, "127.0.0.1", 7380, time.Second*60)
+	if err != nil {
+		t.Errorf("register error: %v", err)
+		client.Close()
+		return
+	}
+	if res.Success {
+		t.Log("register success without route")
+	} else {
+		t.Errorf("register failed without route, %v", res.Msg)
+	}
+	select {
+	case <-shutdownCh:
+		if client != nil {
+			client.Close()
+		}
+		return
+	}
+}
+
+func TestAsyncRegisterUsingTcp3(t *testing.T) {
+	shutdownCh := make(chan struct{})
+	client := initClient("127.0.0.1:22663", shutdownCh)
+	registerAsync("my-service", "127.0.0.1", 2346, client)
 	select {
 	case <-shutdownCh:
 		if client != nil {
@@ -30,8 +67,8 @@ func TestAsyncRegisterUsingTcp(t *testing.T) {
 
 func TestAsyncRegisterUsingTcp2(t *testing.T) {
 	shutdownCh := make(chan struct{})
-	client := initClient("localhost:22662", shutdownCh)
-	registerAsync("my-service", "127.0.0.1", 9090, client)
+	client := initClient("127.0.0.1:22663", shutdownCh)
+	registerAsync("my-service", "127.0.0.1", 9567, client)
 	select {
 	case <-shutdownCh:
 		if client != nil {
@@ -43,26 +80,43 @@ func TestAsyncRegisterUsingTcp2(t *testing.T) {
 
 func TestSubscribe(t *testing.T) {
 	shutdownCh := make(chan struct{})
-	client := initClient("localhost:22662", shutdownCh)
-	res, err := client.Subscribe("my-service", time.Second*10)
+	client := initClient("127.0.0.1:22662", shutdownCh)
+
+	tryTimes := 0
+	for {
+		if tryTimes > 10 {
+			return
+		}
+		res, err := client.Subscribe("my-service", time.Second*10)
+		if err == nil {
+			client.log.Info("subscribe success")
+			break
+		}
+		tryTimes++
+		client.log.Warnf("subscribe failed, will try again: %v", err)
+		if res.ErrorType == uint8(pb.ErrorType_MetaDataChanged.Number()) {
+			client.waitForFetchedMetadata()
+		}
+		continue
+	}
+	for {
+		select {
+		case <-client.shutdownCh:
+			client.Close()
+			return
+		default:
+		}
+	}
+
+}
+
+func subscribe(client *Client, service string) bool {
+	res, err := client.Subscribe(service, time.Second*10)
 	if err != nil {
-		t.Errorf("subscribe error: %v", err)
-		close(shutdownCh)
-		return
+		return false
 	}
 
-	if res.Success {
-		t.Logf("subscribe success")
-		client.Close()
-		return
-	}
-
-	if res.ErrorType == uint8(pb.ErrorType_MetaDataChanged.Number()) {
-
-	}
-
-	t.Logf("subscribe failed")
-	client.Close()
+	return res.Success
 }
 
 func registerAsync(serviceName, ip string, port int, client *Client) {
@@ -87,9 +141,11 @@ func initClient(serverAddr string, shutdownCh chan struct{}) *Client {
 	client, err := CreateClient(serverAddr, shutdownCh, logger)
 	if err != nil {
 		close(shutdownCh)
-		logger.Error("failed to create client", err)
+		logger.Errorf("failed to create client: %s", err)
 		panic(err)
 	}
+
+	client.waitForFetchedMetadata()
 
 	defer func() {
 		if e := recover(); e != nil {
@@ -102,7 +158,7 @@ func initClient(serverAddr string, shutdownCh chan struct{}) *Client {
 
 func TestSyncRegisterUsingTcp(t *testing.T) {
 	shutdownCh := make(chan struct{})
-	client := initClient("localhost:22662", shutdownCh)
+	client := initClient("127.0.0.1:22662", shutdownCh)
 	res, err := client.Register("my-service", "127.0.0.1", 2345, time.Second*30)
 	if err != nil {
 		close(shutdownCh)

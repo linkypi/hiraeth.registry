@@ -5,39 +5,46 @@ import (
 	"errors"
 	pb "github.com/linkypi/hiraeth.registry/client/proto"
 	"github.com/linkypi/hiraeth.registry/common"
-	"github.com/panjf2000/gnet"
 	"github.com/panjf2000/gnet/pkg/pool/goroutine"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
 
+const (
+	ConnKey = "CONN_KEY_"
+	ConnMtx = "CON_MTX_"
+)
+
 type Client struct {
 	sync.Map
-	log         *logrus.Logger
-	pool        *goroutine.Pool
-	shutdownCh  chan struct{}
-	connMap     map[string]*Conn
-	addr        string
-	readBufSize int
-
-	// just for linux
-	eventHandler gnet.EventHandler
-
-	shards       map[string]common.Shard
-	clusterNodes map[string]string
-
+	log        *logrus.Logger
+	pool       *goroutine.Pool
+	shutdownCh chan struct{}
+	//connMap    map[string]*Conn
 	codec common.ICodec
 
+	//  only used for pulling metadata when the client is initialized
+	serverAddrs []string
+	readBufSize int
+
 	turnOnServiceSubs bool
-	serviceInstances  []common.ServiceInstance
+
+	metaData         MetaData
+	serviceInstances []common.ServiceInstance
 
 	serviceName string
 	ip          string
 	port        int
+
+	havePulledMetadata bool
+}
+
+type MetaData struct {
+	shards       map[string]common.Shard
+	clusterNodes map[string]string
 }
 
 type Conn interface {
@@ -48,17 +55,39 @@ type Conn interface {
 	Close() error
 }
 
-func NewClient(readBufSize int, shutdownCh chan struct{}, log *logrus.Logger) *Client {
+// CreateClient addrs can be like: 127.0.0.1:8080,127.0.0.1:8081,127.0.0.1:8082 or 127.0.0.1:8080
+func CreateClient(addrs string, shutdownCh chan struct{}, logger *logrus.Logger) (*Client, error) {
+	return NewClient(addrs, nil, 4096, shutdownCh, logger)
+}
+
+// NewClient addrs can be like: 127.0.0.1:8080,127.0.0.1:8081,127.0.0.1:8082 or 127.0.0.1:8080
+func NewClient(addrs string, codec common.ICodec, readBufSize int, shutdownCh chan struct{}, log *logrus.Logger) (*Client, error) {
+
+	if addrs == "" {
+		return nil, errors.New("addr can not be empty")
+	}
+	servers, ok := common.ParseIpPort(addrs)
+	if !ok {
+		return nil, errors.New("invalid cluster server address: " + addrs)
+	}
+	if codec == nil {
+		codec = &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
+	}
+
+	if readBufSize <= 0 {
+		readBufSize = 1024 * 4
+	}
 
 	client := &Client{
 		log:         log,
-		connMap:     make(map[string]*Conn),
+		serverAddrs: servers,
+		codec:       codec,
 		readBufSize: readBufSize,
 		pool:        goroutine.Default(),
 		shutdownCh:  shutdownCh,
 	}
 
-	return client
+	return client, nil
 }
 
 func init() {
@@ -137,23 +166,50 @@ func (c *Client) Register(serviceName, ip string, port int, timeout time.Duratio
 	return response, nil
 }
 
-func (c *Client) checkMetadataAndConnection(serviceName string) (string, error) {
-	if c.shards == nil || len(c.shards) == 0 {
+func (c *Client) RegisterWithoutRoute(serviceName, addr, ip string, port int, timeout time.Duration) (common.Response, error) {
+
+	requestKey, err := c.registerWithoutRoute(serviceName, addr, ip, port)
+	if err != nil {
+		return common.Response{}, err
+	}
+
+	res, err := c.syncWait(requestKey, timeout)
+	if err != nil {
+		return common.Response{}, err
+	}
+	response := res.(common.Response)
+	if response.Success {
+		c.serviceName = serviceName
+		c.ip = ip
+		c.port = port
+		go c.sendHeartbeatsInPeriod()
+		go func() {
+			_ = c.fetchMetadata()
+		}()
+	}
+	return response, nil
+}
+
+func (c *Client) findRouteAndCheckConn(serviceName string) (string, error) {
+	if c.metaData.shards == nil || len(c.metaData.shards) == 0 {
 		err := c.fetchMetadata()
 		if err != nil {
 			return "", err
 		}
 	}
 	index := common.GetBucketIndex(serviceName)
-	serverId, err := common.GetNodeIdByIndex(index, c.shards)
+	serverId, err := common.GetNodeIdByIndex(index, c.metaData.shards)
 	if err != nil {
 		return "", err
 	}
-	addr, ok := c.clusterNodes[serverId]
+	addr, ok := c.metaData.clusterNodes[serverId]
 	if !ok {
 		return "", errors.New("node not found")
 	}
-	return c.checkConnection(serverId, addr)
+	if _, ok = c.Load(ConnKey + addr); ok {
+		return addr, nil
+	}
+	return c.checkConnection(addr)
 }
 
 func (c *Client) updateServiceInstances() error {
@@ -162,29 +218,38 @@ func (c *Client) updateServiceInstances() error {
 		return err
 	}
 	c.serviceInstances = make([]common.ServiceInstance, 0, len(response.ServiceInstances))
-	for i, instance := range response.ServiceInstances {
+	for _, instance := range response.ServiceInstances {
 		item := common.ServiceInstance{InstanceIp: instance.ServiceIp,
 			InstancePort: int(instance.ServicePort),
 			ServiceName:  instance.ServiceName}
-		c.serviceInstances[i] = item
+		c.serviceInstances = append(c.serviceInstances, item)
 	}
+	c.log.Debugf("fetched service instances: %d", len(c.serviceInstances))
 	return nil
 }
 
 func (c *Client) FetchServiceInstances() (*pb.FetchServiceResponse, error) {
+
+	addr, err := c.findRouteAndCheckConn(c.serviceName)
+	if err != nil {
+		return nil, err
+	}
 	request := pb.FetchServiceRequest{
 		ServiceName: c.serviceName,
 	}
-	requestKey, err := c.sendRequest(c.addr, common.FetchServiceInstance, &request)
+	requestKey, err := c.sendRequest(addr, common.FetchServiceInstance, &request)
 	if err != nil {
 		c.log.Warnf("fetch service instance request failed, err: %v", err)
 		return nil, err
 	}
 
 	res, err := c.syncWait(requestKey, time.Second*10)
+	if err != nil {
+		return nil, err
+	}
 	response := res.(common.Response)
-	var sresp *pb.FetchServiceResponse
-	err = proto.Unmarshal(response.Payload, sresp)
+	sresp := &pb.FetchServiceResponse{}
+	err = common.DecodeToPb(response.Payload, sresp)
 	if err != nil {
 		c.log.Warnf("decode fetch service instance response failed, err: %v", err)
 		return nil, err
@@ -192,13 +257,72 @@ func (c *Client) FetchServiceInstances() (*pb.FetchServiceResponse, error) {
 	return sresp, nil
 }
 
+func (c *Client) waitForFetchedMetadata() {
+	for {
+		select {
+		case <-c.shutdownCh:
+			return
+		default:
+		}
+		// If the metadata is pulled again, the error may be that the cluster is starting,
+		// and you need to wait for the cluster to be in a normal state and pull it again
+		err := c.fetchMetadata()
+		if err != nil {
+			time.Sleep(time.Second * 5)
+			c.log.Errorf("fetch metadata error: %s", err)
+			continue
+		}
+		c.log.Info("Re-pull the metadata success")
+		break
+	}
+}
+
 func (c *Client) fetchMetadata() error {
-	response, err := c.FetchMetadata()
+
+	addr := ""
+	for {
+		if c.havePulledMetadata {
+			for _, serverAddr := range c.metaData.clusterNodes {
+				_, err := c.checkConnection(serverAddr)
+				if err != nil {
+					c.log.Debugf("check connection failed, err: %v", err)
+					continue
+				}
+				addr = serverAddr
+				break
+			}
+		} else {
+			for _, serverAddr := range c.serverAddrs {
+				_, err := c.checkConnection(serverAddr)
+				if err != nil {
+					c.log.Debugf("check connection failed, err: %v", err)
+					continue
+				}
+				addr = serverAddr
+				break
+			}
+		}
+		if addr != "" {
+			break
+		}
+		time.Sleep(time.Second * 5)
+	}
+
+	response, err := c.FetchMetadata(addr)
 	if err != nil {
 		c.log.Errorf("failed to fetch metadata: %v", err)
 		return err
 	}
+
 	if !response.Success {
+		if response.ErrorType == uint8(pb.ErrorType_ClusterDown.Number()) {
+			c.log.Errorf("failed to fetch metadata, cluster down, try to connect other nodes")
+			err = c.connectOtherServers(addr)
+			if err != nil {
+				return err
+			}
+			return c.fetchMetadata()
+		}
 		c.log.Errorf("failed to fetch metadata: %v", response.Msg)
 		return err
 	}
@@ -208,20 +332,73 @@ func (c *Client) fetchMetadata() error {
 		c.log.Errorf("failed to decode metadata: %v", err)
 		return err
 	}
-
 	var shards map[string]common.Shard
 	err = json.Unmarshal([]byte(metadata.Shards), &shards)
 	if err != nil {
 		c.log.Errorf("failed to unmarshal shard json: %v", err)
 		return err
 	}
-	c.shards = shards
-	c.clusterNodes = metadata.Nodes
+	c.metaData = MetaData{
+		shards:       shards,
+		clusterNodes: metadata.Nodes,
+	}
 	c.log.Debugf("fetch metadata success: %s", metadata.Shards)
+	c.havePulledMetadata = true
+
+	go c.ensureConnectedToQuorumServers()
 	return nil
 }
 
+func (c *Client) ensureConnectedToQuorumServers() {
+	allConnected := true
+	time.NewTimer(time.Second * 10)
+	for {
+		select {
+		case <-c.shutdownCh:
+			return
+		default:
+		}
+
+		allConnected = true
+		for _, addr := range c.metaData.clusterNodes {
+			_, err := c.checkConnection(addr)
+			if err != nil {
+				allConnected = false
+				time.Sleep(time.Second * 5)
+				continue
+			}
+		}
+		if allConnected {
+			break
+		}
+	}
+}
+
+func (c *Client) connectOtherServers(addr string) error {
+	c.log.Infof("try to connect other cluster server")
+	if len(c.serverAddrs) == 1 {
+		c.log.Debugf("only one cluster server, no need to connect other servers")
+		return errors.New("only one cluster server")
+	}
+
+	for _, sAddr := range c.serverAddrs {
+		if sAddr == addr {
+			continue
+		}
+		c.log.Infof("connect to server: %s", sAddr)
+		_, err := c.createConn(sAddr)
+		if err != nil {
+			time.Sleep(time.Second * 5)
+			continue
+		}
+		c.log.Infof("connected to other cluster server: %s", sAddr)
+		return nil
+	}
+	return errors.New("failed to connect other cluster server")
+}
+
 func (c *Client) Subscribe(serviceName string, timeout time.Duration) (common.Response, error) {
+	c.serviceName = serviceName
 	requestKey, err := c.subscribe(serviceName)
 	if err != nil {
 		return common.Response{}, err
@@ -243,8 +420,8 @@ func (c *Client) Subscribe(serviceName string, timeout time.Duration) (common.Re
 	return response, nil
 }
 
-func (c *Client) FetchMetadata() (common.Response, error) {
-	requestKey, err := c.sendRequest(c.addr, common.FetchMetadata, nil)
+func (c *Client) FetchMetadata(addr string) (common.Response, error) {
+	requestKey, err := c.sendRequest(addr, common.FetchMetadata, nil)
 	if err != nil {
 		return common.Response{}, err
 	}
@@ -309,7 +486,7 @@ func (c *Client) sendHeartbeat(serviceName string, ip string, port int) (string,
 		ServiceIp:   ip,
 		ServicePort: int32(port),
 	}
-	connKey, err := c.checkMetadataAndConnection(serviceName)
+	connKey, err := c.findRouteAndCheckConn(serviceName)
 	if err != nil {
 		return "", err
 	}
@@ -323,15 +500,24 @@ func (c *Client) register(serviceName string, ip string, port int) (string, erro
 		ServiceIp:   ip,
 		ServicePort: int32(port),
 	}
-	connKey, err := c.checkMetadataAndConnection(serviceName)
+	serverAddr, err := c.findRouteAndCheckConn(serviceName)
 	if err != nil {
 		return "", err
 	}
-	return c.sendRequest(connKey, common.Register, &regRequest)
+	return c.sendRequest(serverAddr, common.Register, &regRequest)
+}
+
+func (c *Client) registerWithoutRoute(serviceName, serverAddr string, ip string, port int) (string, error) {
+	regRequest := pb.RegisterRequest{
+		ServiceName: serviceName,
+		ServiceIp:   ip,
+		ServicePort: int32(port),
+	}
+	return c.sendRequest(serverAddr, common.Register, &regRequest)
 }
 
 func (c *Client) sendResponse(serviceName string, requestId uint64, res proto.Message) (uint64, error) {
-	serverId, err := c.checkMetadataAndConnection(serviceName)
+	serverId, err := c.findRouteAndCheckConn(serviceName)
 	if err != nil {
 		return 0, err
 	}
@@ -344,7 +530,12 @@ func (c *Client) sendResponse(serviceName string, requestId uint64, res proto.Me
 	if err != nil {
 		return 0, err
 	}
-	_, err = (*c.connMap[addr]).Write(toBytes)
+	con, ok := c.Load(ConnKey + addr)
+	if !ok {
+		return 0, errors.New("failed to send request, connection not found: " + addr)
+	}
+	conn := con.(*Conn)
+	_, err = (*conn).Write(toBytes)
 	if err != nil {
 		return 0, err
 	}
@@ -352,7 +543,7 @@ func (c *Client) sendResponse(serviceName string, requestId uint64, res proto.Me
 }
 
 func (c *Client) getAddr(serverId string) (string, error) {
-	addr, ok := c.clusterNodes[serverId]
+	addr, ok := c.metaData.clusterNodes[serverId]
 	if !ok {
 		c.log.Errorf("failed to send response, server addr not found, serverId: %s", serverId)
 		return "", errors.New("failed to send response, server addr not found")
@@ -360,27 +551,36 @@ func (c *Client) getAddr(serverId string) (string, error) {
 	return addr, nil
 }
 
-func (c *Client) sendRequest(connKey string, requestType common.RequestType, request proto.Message) (string, error) {
+func (c *Client) sendRequest(addr string, requestType common.RequestType, request proto.Message) (string, error) {
 	requestId, toBytes, err := common.BuildRequestToBytes(requestType, request)
 	if err != nil {
 		c.log.Errorf("Error encoding pb: %v", err)
 		return "", err
 	}
-	_, err = (*c.connMap[connKey]).Write(toBytes)
+	con, ok := c.Load(ConnKey + addr)
+	if !ok {
+		return "", errors.New("failed to send request, connection not found: " + addr)
+	}
+	if con == nil {
+		return "", errors.New("failed to send request, connection not found: " + addr)
+	}
+	conn := con.(*Conn)
+	_, err = (*conn).Write(toBytes)
 	if err != nil {
 		return "", err
 	}
 	requestKey := requestType.String() + strconv.Itoa(int(requestId))
 	c.Store(requestKey, nil)
-	c.log.Debugf("send request: %s", requestKey)
+	c.log.Debugf("send request: %s to %s", requestType.String(), addr)
 	return requestKey, nil
 }
 
 func (c *Client) subscribe(serviceName string) (string, error) {
-	subRequest := pb.SubscribeRequest{
+	subRequest := pb.SubRequest{
 		ServiceName: serviceName,
+		SubType:     pb.SubType_Subscribe,
 	}
-	connKey, err := c.checkMetadataAndConnection(serviceName)
+	connKey, err := c.findRouteAndCheckConn(serviceName)
 	if err != nil {
 		return "", err
 	}
@@ -388,24 +588,25 @@ func (c *Client) subscribe(serviceName string) (string, error) {
 }
 
 func (c *Client) Close() {
-	if c.connMap != nil {
-		for id, cn := range c.connMap {
-			err := (*cn).Close()
-			if err != nil {
-				c.log.Errorf("failed to close server connection: %s, %v", id, err)
-			}
+	c.Range(func(key, cn interface{}) bool {
+		conn := cn.(*Conn)
+		err := (*conn).Close()
+		if err != nil {
+			c.log.Errorf("failed to close server connection: %s, %v", key, err)
 		}
-	}
+		c.Delete(key)
+		return true
+	})
+
 }
 
-func (c *Client) checkConnection(serverId, addr string) (string, error) {
-	addr = strings.Replace(addr, "localhost", "127.0.0.1", -1)
-	if _, ok := c.connMap[addr]; !ok {
+func (c *Client) checkConnection(addr string) (string, error) {
+	if _, ok := c.Load(ConnKey + addr); !ok {
 		conn, err := c.createConn(addr)
 		if err != nil {
 			return "", err
 		}
-		c.connMap[addr] = &conn
+		c.Store(ConnKey+addr, &conn)
 	}
 	return addr, nil
 }
@@ -446,4 +647,53 @@ func (c *Client) onReceive(bytes []byte, err error) {
 		c.log.Errorf("invalid msg: %v", err)
 		return
 	}
+}
+
+func (c *Client) createConn(addr string) (Conn, error) {
+
+	exCon, err, creating := c.checkConnCreatingOrNot(addr)
+	if creating {
+		return exCon, err
+	}
+
+	lockKey := ConnMtx + addr
+	// add conn lock
+	c.Store(lockKey, addr)
+	defer func() {
+		c.Delete(lockKey)
+	}()
+	c.log.Debugf("create conn %s", addr)
+	con, err := c.createConnInternal(addr)
+	if err != nil {
+		return nil, err
+	}
+	c.Store(ConnKey+addr, &con)
+	return con, nil
+}
+
+func (c *Client) checkConnCreatingOrNot(addr string) (Conn, error, bool) {
+	lockKey := ConnMtx + addr
+	_, ok := c.Load(lockKey)
+
+	// If there is already a goroutine creating the connection
+	// timeout waits for the previous connection to be created, and the timeout period is 10 seconds
+	timer := time.NewTimer(time.Second * 10)
+	for ok {
+		// Check if the lock is released
+		if _, ok = c.Load(lockKey); !ok {
+			value, exist := c.Load(ConnKey + addr)
+			if exist {
+				conn := value.(*Conn)
+				return *conn, nil, true
+			}
+		}
+		select {
+		case <-c.shutdownCh:
+			return nil, errors.New("shutdown"), true
+		case <-timer.C:
+			return nil, errors.New("create conn timeout"), true
+		default:
+		}
+	}
+	return nil, nil, false
 }

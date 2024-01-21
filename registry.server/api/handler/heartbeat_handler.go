@@ -13,10 +13,6 @@ type HeartbeatHandler struct {
 	ServiceImpl *ServiceImpl
 }
 
-func (r *HeartbeatHandler) getRequestType() common.RequestType {
-	return common.Register
-}
-
 func (r *HeartbeatHandler) Handle(req common.Request, con gnet.Conn) common.Response {
 	request := pb.HeartbeatRequest{}
 	err := proto.Unmarshal(req.Payload, &request)

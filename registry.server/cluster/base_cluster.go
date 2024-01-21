@@ -51,7 +51,8 @@ type BaseCluster struct {
 type State int
 
 const (
-	Initializing State = iota
+	NoneState State = iota
+	Initializing
 	// Active The cluster is active and can be read and written to
 	Active
 	// Transitioning The cluster is transitioning to a new state
@@ -69,7 +70,7 @@ const (
 )
 
 func (s State) String() string {
-	names := [...]string{"Initializing", "Active", "Transitioning", "Down", "StandBy", "Maintenance", "Unknown"}
+	names := [...]string{"NoneState", "Initializing", "Active", "Transitioning", "Down", "StandBy", "Maintenance", "Unknown"}
 	if s < 0 || s > State(len(names)-1) {
 		return "Unknown"
 	}
@@ -80,7 +81,7 @@ func (b *BaseCluster) SetState(state State) {
 	b.StateMtx.Lock()
 	defer b.StateMtx.Unlock()
 	b.State = state
-	b.MetaData.State = state
+	b.MetaData.State = state.String()
 	b.Log.Debugf("cluster state changed to %s", state)
 }
 
@@ -260,9 +261,8 @@ func (b *BaseCluster) FindRouteAndExecOrForward(target string, doFunc func(bucke
 	return b.FindRouteAndExec(target, doFunc, true, getForwardArgs)
 }
 
-func (b *BaseCluster) FindRouteAndExecNoForward(target string, doFunc func(bucket *slot.Bucket) (any, error),
-	getForwardArgs func() (pb.RequestType, []byte, error)) (any, error) {
-	return b.FindRouteAndExec(target, doFunc, false, getForwardArgs)
+func (b *BaseCluster) FindRouteAndExecNoForward(target string, doFunc func(bucket *slot.Bucket) (any, error)) (any, error) {
+	return b.FindRouteAndExec(target, doFunc, false, nil)
 }
 
 func (b *BaseCluster) FindRouteAndExec(target string, doFunc func(bucket *slot.Bucket) (any, error), forward bool,

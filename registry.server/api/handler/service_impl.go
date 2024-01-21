@@ -67,7 +67,7 @@ func (s *ServiceImpl) FetchMetadata() (*pb.FetchMetadataResponse, error) {
 	// If it is a cluster mode, you need to check the cluster status first
 	if s.Cluster.State != cluster.Active {
 		s.Log.Errorf("failed to fetch meta data, cluster state not active: %v", s.Cluster.State.String())
-		return nil, errors.New("cluster state not active: " + s.Cluster.State.String())
+		return &pb.FetchMetadataResponse{ErrorType: pb.ErrorType_ClusterDown}, nil
 	}
 	return s.doFetchMetadata()
 }
@@ -78,8 +78,7 @@ func (s *ServiceImpl) FetchServiceInstance(serviceName string) (*pb.FetchService
 		return s.doGetServiceInstance(serviceName, bucket)
 	}, func() (pb.RequestType, []byte, error) {
 		// forwarding to the right node
-		request := pb.FetchServiceResponse{
-			ServiceName: serviceName}
+		request := pb.FetchServiceResponse{ServiceName: serviceName, ServiceInstances: make([]*pb.ServiceInstance, 0)}
 
 		payload, err := common.EncodePb(&request)
 		if err != nil {
@@ -110,18 +109,21 @@ func (s *ServiceImpl) Subscribe(serviceName, connId string) error {
 	if serviceName == "" {
 		return errors.New("service name not empty")
 	}
-
 	_, err := s.Cluster.FindRouteAndExecNoForward(serviceName, func(bucket *slot.Bucket) (any, error) {
 		bucket.Subscribe(serviceName, connId, s.OnSubEvent)
 		return nil, nil
-	}, func() (pb.RequestType, []byte, error) {
-		// forwarding to the right node
-		subRequest := pb.SubscribeRequest{ServiceName: serviceName}
-		payload, err := common.EncodePb(&subRequest)
-		if err != nil {
-			return pb.RequestType_Unknown, nil, err
-		}
-		return pb.RequestType_Subscribe, payload, nil
+	})
+	return err
+}
+
+func (s *ServiceImpl) UnSubscribe(serviceName, addr string) error {
+	if serviceName == "" {
+		return errors.New("service name not empty")
+	}
+
+	_, err := s.Cluster.FindRouteAndExecNoForward(serviceName, func(bucket *slot.Bucket) (any, error) {
+		bucket.Unsubscribe(serviceName, addr)
+		return nil, nil
 	})
 
 	if err == nil {
@@ -172,12 +174,12 @@ func (s *ServiceImpl) doRegister(bucket *slot.Bucket, serviceName, serviceIp str
 func (s *ServiceImpl) doGetServiceInstance(serviceName string, bucket *slot.Bucket) (*pb.FetchServiceResponse, error) {
 	instances := bucket.GetServiceInstances(serviceName)
 	if instances == nil {
-		return &pb.FetchServiceResponse{ServiceName: serviceName}, nil
+		return &pb.FetchServiceResponse{ServiceName: serviceName, ServiceInstances: make([]*pb.ServiceInstance, 0)}, nil
 	}
 	list := make([]*pb.ServiceInstance, 0, len(instances))
 	for _, instance := range instances {
 		item := &pb.ServiceInstance{ServiceName: serviceName, ServiceIp: instance.InstanceIp, ServicePort: int32(instance.InstancePort)}
 		list = append(list, item)
 	}
-	return &pb.FetchServiceResponse{ServiceInstances: list}, nil
+	return &pb.FetchServiceResponse{ServiceInstances: list, ServiceName: serviceName}, nil
 }

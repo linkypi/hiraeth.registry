@@ -4,11 +4,12 @@ option go_package = "../proto";
 
 enum ErrorType {
   None = 0;
-  ClusterStateNotMatch = 1;
-  ClusterIdNotMatch = 2;
-  LeaderIdNotMatch = 3;
-  TermNotMatch = 4;
+  ClusterDown = 1;
+  ClusterStateNotMatch = 2;
+  ClusterIdNotMatch = 3;
+  LeaderIdNotMatch = 4;
+  TermNotMatch = 5;
 
-  MetaDataChanged = 5;
-  UnknownError = 6;
+  MetaDataChanged = 6;
+  UnknownError = 7;
 }

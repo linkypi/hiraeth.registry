@@ -13,10 +13,6 @@ type RegisterHandler struct {
 	ServiceImpl *ServiceImpl
 }
 
-func (r *RegisterHandler) getRequestType() common.RequestType {
-	return common.Register
-}
-
 func (r *RegisterHandler) Handle(req common.Request, con gnet.Conn) common.Response {
 	request := pb.RegisterRequest{}
 	err := proto.Unmarshal(req.Payload, &request)

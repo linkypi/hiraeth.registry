@@ -5,6 +5,7 @@ package common
 import (
 	"github.com/panjf2000/gnet/pkg/pool/goroutine"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -57,6 +58,9 @@ func (r *WinReader) Receive(handleEvent HandleReceiveEvent, onConnClosed ConnClo
 		// and the relevant code is in gnet@1.6.7/acceptor_windows.go -> line number 56
 		// https://github.com/panjf2000/gnet
 		if stdErr != nil {
+			if strings.Contains(stdErr.Error(), "use of closed network connection") {
+				continue
+			}
 			_ = r.conn.SetReadDeadline(time.Time{})
 			addr := r.conn.RemoteAddr().String()
 			Log.Warnf("remote connection is closed: %s", addr)

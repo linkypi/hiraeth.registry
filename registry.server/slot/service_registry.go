@@ -14,10 +14,10 @@ import (
 
 const (
 	// SubsServicePrefix Stores a list of client addresses for the service
-	SubsServicePrefix = "subs-service-"
+	SubsServicePrefix = "subs_service_"
 
-	InstanceIdPrefix = "instance-id-"
-	ServiceKeyPrefix = "service-instances-"
+	InstanceIdPrefix = "instance_id_"
+	ServiceKeyPrefix = "service_instances_"
 )
 
 type ServiceRegistry struct {
@@ -36,6 +36,7 @@ func NewServiceRegistry(clusterConfig config.ClusterConfig, shutdownCh chan stru
 }
 
 func checkServiceInstanceStatePeriod(clusterConfig config.ClusterConfig, shutdownCh chan struct{}, serviceRegistry *ServiceRegistry, log *logrus.Logger) {
+	printTime := time.Now()
 	for {
 		select {
 		case <-shutdownCh:
@@ -51,9 +52,12 @@ func checkServiceInstanceStatePeriod(clusterConfig config.ClusterConfig, shutdow
 				}
 				instance := value.(common.ServiceInstance)
 
-				log.Debugf("service instance %s:%d lastest heartbeat time: %s, State: %s",
-					instance.InstanceIp, instance.InstancePort,
-					instance.LastHeartbeatTime, instance.State.String())
+				if time.Now().Sub(printTime).Seconds() > 30 {
+					log.Debugf("service instance %s:%d lastest heartbeat time: %s, State: %s",
+						instance.InstanceIp, instance.InstancePort,
+						instance.LastHeartbeatTime, instance.State.String())
+					printTime = time.Now()
+				}
 
 				duration := time.Since(instance.LastHeartbeatTime).Seconds()
 				if duration > float64(clusterConfig.ServiceInstanceRemoveTimeoutSec) {
@@ -62,8 +66,13 @@ func checkServiceInstanceStatePeriod(clusterConfig config.ClusterConfig, shutdow
 						instance.InstanceIp, instance.InstancePort)
 
 					serviceRegistry.Delete(key)
-					serviceRegistry.removeFromInstances(instance)
+					instances := serviceRegistry.removeFromInstances(instance)
+
+					// Notify all clients that have subscribed to the service
+					serviceRegistry.maybePublishChangedService(instance.ServiceName, instances)
+					// Remove the address list when the notification is complete
 					removeInstanceAddr(instance, serviceRegistry)
+
 					return true
 				}
 				if duration > float64(clusterConfig.ServiceInstanceUnhealthyTimeoutSec) {
@@ -92,15 +101,15 @@ func removeInstanceAddr(instance common.ServiceInstance, serviceRegistry *Servic
 	}
 }
 
-func (s *ServiceRegistry) removeFromInstances(instance common.ServiceInstance) {
+func (s *ServiceRegistry) removeFromInstances(instance common.ServiceInstance) []common.ServiceInstance {
 	listKey := ServiceKeyPrefix + instance.ServiceName
 	list, ok := s.Load(listKey)
 	if !ok {
-		return
+		return nil
 	}
 	instances := list.([]common.ServiceInstance)
 	if instances == nil {
-		return
+		return nil
 	}
 	for i := 0; i < len(instances); i++ {
 		serviceInstance := instances[i]
@@ -108,10 +117,10 @@ func (s *ServiceRegistry) removeFromInstances(instance common.ServiceInstance) {
 			instances = append(instances[:i], instances[i+1:]...)
 			s.Store(listKey, instances)
 			log.Log.Debugf("remove service instance %s:%d from service %s.", instance.InstanceIp, instance.InstancePort, instance.ServiceName)
-			return
+			return instances
 		}
 	}
-	return
+	return nil
 }
 
 func (s *ServiceRegistry) Heartbeat(serviceName, ip string, port int) {
@@ -135,6 +144,7 @@ func (s *ServiceRegistry) Subscribe(serviceName string, connId string, trigger S
 	if !ok {
 		addrMap[connId] = connId
 		s.Store(key, addrMap)
+		s.maybePublishChangedService(serviceName, nil)
 		return
 	}
 	listMap := list.(map[string]string)
@@ -144,6 +154,7 @@ func (s *ServiceRegistry) Subscribe(serviceName string, connId string, trigger S
 	}
 	listMap[connId] = connId
 	s.Store(key, listMap)
+	s.maybePublishChangedService(serviceName, nil)
 }
 
 func (s *ServiceRegistry) Unsubscribe(serviceName string, connId string) {
@@ -182,6 +193,8 @@ func (s *ServiceRegistry) Register(serviceName string, instanceIp string, instan
 		list = append(list, instance)
 		s.Store(ServiceKeyPrefix+serviceName, list)
 		s.Store(InstanceIdPrefix+instance.GetInstanceId(), instance)
+
+		s.maybePublishChangedService(serviceName, list)
 		return
 	}
 
@@ -196,21 +209,32 @@ func (s *ServiceRegistry) Register(serviceName string, instanceIp string, instan
 	if !exist {
 		list = append(list, instance)
 		s.Store(InstanceIdPrefix+instance.GetInstanceId(), instance)
+
 		// Notify all clients that have subscribed to the service
-		key := SubsServicePrefix + serviceName
-		listenerMap, ok := s.Load(key)
-		if ok {
-			subMap := listenerMap.(map[string]string)
-			if len(subMap) > 0 {
-				connIds := make([]string, 0, len(subMap))
-				for _, addr := range subMap {
-					connIds = append(connIds, addr)
-				}
-				go s.trigger(connIds, serviceName, list)
-			}
-		}
+		s.maybePublishChangedService(serviceName, list)
 	}
 	s.Store(ServiceKeyPrefix+serviceName, list)
+}
+
+func (s *ServiceRegistry) maybePublishChangedService(serviceName string, list []common.ServiceInstance) {
+	key := SubsServicePrefix + serviceName
+	listenerMap, ok := s.Load(key)
+	if ok {
+		subMap := listenerMap.(map[string]string)
+		if len(subMap) > 0 {
+			connIds := make([]string, 0, len(subMap))
+			for _, addr := range subMap {
+				connIds = append(connIds, addr)
+			}
+			if list == nil || len(list) == 0 {
+				value, ok := s.Load(ServiceKeyPrefix + serviceName)
+				if ok {
+					list = value.([]common.ServiceInstance)
+				}
+			}
+			go s.trigger(connIds, serviceName, list)
+		}
+	}
 }
 
 func NewServiceInstance(serviceName string, instanceIp string, instancePort int) *common.ServiceInstance {

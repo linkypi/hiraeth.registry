@@ -139,6 +139,7 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 	atomic.AddUint64(&l.ClusterId, 1)
 	// persist the meta data
 	metaData := MetaData{
+		State:           l.State.String(),
 		ClusterId:       l.ClusterId,
 		LeaderId:        l.Leader.Id,
 		Term:            l.Leader.Term,
@@ -152,7 +153,7 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 		CreateTime:      formattedTime,
 	}
 
-	marshal, err = json.Marshal(metaData)
+	marshal, err = json.Marshal(&metaData)
 	if err != nil {
 		return err
 	}

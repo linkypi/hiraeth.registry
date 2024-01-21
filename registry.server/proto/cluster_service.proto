@@ -26,7 +26,7 @@ enum RequestType {
   Unknown = 0;
   Register = 1;
   Heartbeat = 2;
-  Subscribe = 3;
+  SubService = 3;
   FetchServiceInstance = 4;
 }
 message ForwardCliResponse {

@@ -429,11 +429,13 @@ func (b *BaseCluster) ApplyClusterMetaData(err error, req *pb.PublishMetadataReq
 	jsonBytes, _ = json.Marshal(b.ClusterActualNodes)
 	b.Log.Debugf("update cluster actual nodes to: %s", string(jsonBytes))
 
-	metaData.State = b.State
+	metaData.State = b.State.String()
 	metaData.NodeConfig = *b.NodeConfig
 	metaData.CreateTime = time.Now().Format("2006-01-02 15:04:05")
 	b.MetaData = metaData
 	b.ClusterId = metaData.ClusterId
+
+	b.Log.Debugf("cluster id update to: %d", b.ClusterId)
 
 	err = common.PersistToJsonFileWithCheckSum(b.NodeConfig.DataDir+MetaDataFileName, metaData)
 	if err != nil {

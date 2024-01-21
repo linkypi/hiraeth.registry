@@ -77,16 +77,21 @@ func (s *Server) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
 }
 
 func (s *Server) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
-	s.log.Infof("client connection is closed, remote addr: %s, error: %v", c.RemoteAddr().String(), err)
+	s.log.Infof("client connection is closed, error: %v", err)
 	s.netManager.RemoveConn(c.RemoteAddr().String())
+
+	reqHandler := s.requestHandler.GetHandlerByRequestType(common.Subscribe)
+	subHandler := reqHandler.(*handler.SubHandler)
+	subHandler.UnSub(c.RemoteAddr().String())
+
 	return
 }
 
-func (s *Server) Tick() (delay time.Duration, action gnet.Action) {
-	s.netManager.SendHeartbeat()
-	delay = time.Duration(s.heartbeatSec) * time.Millisecond
-	return
-}
+//func (s *Server) Tick() (delay time.Duration, action gnet.Action) {
+//	s.netManager.SendHeartbeat()
+//	delay = time.Duration(s.heartbeatSec) * time.Millisecond
+//	return
+//}
 
 func (s *Server) React(buffer []byte, c gnet.Conn) (out []byte, action gnet.Action) {
 

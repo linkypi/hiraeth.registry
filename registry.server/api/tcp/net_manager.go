@@ -32,7 +32,7 @@ func (net *NetManager) SendHeartbeat() {
 func (net *NetManager) GetConn(addr string) gnet.Conn {
 	c, ok := net.connections.Load(addr)
 	if !ok {
-		net.log.Errorf("no connection to %s", addr)
+		net.log.Errorf("connection not found %s", addr)
 		return nil
 	}
 	return c.(gnet.Conn)

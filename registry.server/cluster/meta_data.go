@@ -15,7 +15,7 @@ type MetaData struct {
 	ActualNodeMap   map[string]config.NodeInfo `json:"actualNodeMap"`
 	ActualNodes     []config.NodeInfo          `json:"actualNodes"`
 
-	State         State                `json:"state"`
+	State         string               `json:"state"`
 	NodeConfig    config.NodeConfig    `json:"nodeConfig"`
 	ClusterConfig config.ClusterConfig `json:"clusterConfig"`
 
@@ -38,5 +38,7 @@ func (m MetaData) MarshalJSON() ([]byte, error) {
 		"clusterConfig":   m.ClusterConfig,
 		"shards":          m.Shards,
 		"replicas":        m.Replicas,
+		"clusterId":       m.ClusterId,
+		"createTime":      m.CreateTime,
 	})
 }

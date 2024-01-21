@@ -93,8 +93,8 @@ func (b *BuildInFixedLengthCodec) DecodeFor(data []byte) ([]byte, error) {
 
 	// parse payload
 	dataLen := int(dataLength) // max int32 can contain 210MB payload
-	readLen := data[headerLen:]
-	if len(readLen) == dataLen {
+	readLen := len(data[headerLen:])
+	if readLen == dataLen {
 		// return the payload of the data
 		return data[headerLen:], nil
 	}
