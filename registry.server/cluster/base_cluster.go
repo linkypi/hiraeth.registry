@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"github.com/hashicorp/raft"
 	"github.com/linkypi/hiraeth.registry/common"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/cluster/network"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
 	"github.com/linkypi/hiraeth.registry/server/slot"
 	"github.com/sirupsen/logrus"
 	"strconv"
@@ -252,79 +252,20 @@ func (b *BaseCluster) GetNodeIdByIndex(index int) (string, error) {
 	return common.GetNodeIdByIndex(index, b.MetaData.Shards)
 }
 
-// FindRouteAndExecOrForward Check the machine deployment mode first, and if it is a stand-alone mode, the registration logic
-// will be executed by doFunc directly, and if it is a cluster mode, the cluster status will be checked first.
-// If the cluster is normal, select the target node according to the consistent hashing algorithm, and if the
-// target node is the current node, directly execute doFunc, otherwise getForwardArgs is used to forward the request to the target node
-func (b *BaseCluster) FindRouteAndExecOrForward(target string, doFunc func(bucket *slot.Bucket) (any, error),
-	getForwardArgs func() (pb.RequestType, []byte, error)) (any, error) {
-	return b.FindRouteAndExec(target, doFunc, true, getForwardArgs)
-}
+func (b *BaseCluster) ForwardRequest(nodeId string, requestType pb.RequestType, syncReplica bool, payload []byte) (*pb.ForwardCliResponse, error) {
 
-func (b *BaseCluster) FindRouteAndExecNoForward(target string, doFunc func(bucket *slot.Bucket) (any, error)) (any, error) {
-	return b.FindRouteAndExec(target, doFunc, false, nil)
-}
-
-func (b *BaseCluster) FindRouteAndExec(target string, doFunc func(bucket *slot.Bucket) (any, error), forward bool,
-	getForwardArgs func() (pb.RequestType, []byte, error)) (any, error) {
-
-	bucketIndex := common.GetBucketIndex(target)
-	// If it is a stand-alone mode, you can register directly
-	if b.StartUpMode == config.StandAlone {
-		bucket := b.SlotManager.GetSlotByIndex(bucketIndex)
-		res, err := doFunc(bucket)
-		if err != nil {
-			return nil, err
+	defer func() {
+		if err := recover(); err != nil {
+			b.Log.Errorf("[cluster] forward request failed, %s", err)
 		}
-		return res, nil
-	}
-
-	// If it is a cluster mode, you need to check the cluster status first
-	if b.State != Active {
-		b.Log.Errorf("failed to find the route: %s, cluster state not active: %v", target, b.State.String())
-		return nil, errors.New("cluster state not active: " + b.State.String())
-	}
-
-	nodeId, err := b.GetNodeIdByIndex(bucketIndex)
-	if err != nil {
-		b.Log.Errorf("failed to find node id for the target: %s, %v", target, err.Error())
-		return nil, errors.New("target node id not found")
-	}
-	if nodeId == b.SelfNode.Id {
-		bucket := b.SlotManager.GetSlotByIndex(bucketIndex)
-		res, err := doFunc(bucket)
-		if err != nil {
-			return nil, err
-		}
-		return res, nil
-	}
-
-	// For some special requests, we cannot forward, such as service subscriptions
-	// Subscription requests do not need to be forwarded because the server needs to be directly
-	// connected to the client to send service change notifications
-	if !forward {
-		return nil, common.ErrorMetadataChanged
-	}
-	// forwarding to the right node
-	requestType, payload, err := getForwardArgs()
-	if err != nil {
-		return nil, err
-	}
-	response, err := b.ForwardRequest(nodeId, requestType, payload)
-	if err != nil {
-		return nil, err
-	}
-	return response.Payload, nil
-}
-
-func (b *BaseCluster) ForwardRequest(nodeId string, requestType pb.RequestType, payload []byte) (*pb.ForwardCliResponse, error) {
-
+	}()
 	cliRequest := pb.ForwardCliRequest{
 		ClusterId:   b.ClusterId,
 		LeaderId:    b.Leader.Id,
 		Term:        b.Leader.Term,
 		RequestType: requestType,
 		Payload:     payload,
+		SyncReplica: syncReplica,
 	}
 	interRpcClient := b.GetInterRpcClient(nodeId)
 	response, err := (*interRpcClient).ForwardClientRequest(context.Background(), &cliRequest)
@@ -333,15 +274,8 @@ func (b *BaseCluster) ForwardRequest(nodeId string, requestType pb.RequestType, 
 		return nil, err
 	}
 
-	var res pb.ForwardCliResponse
-	err = common.Decode(response.Payload, &res)
-	if err != nil {
-		b.Log.Errorf("failed to decode %s forward response, %v", requestType.String(), err)
-		return nil, err
-	}
-
-	if res.ErrorType == pb.ErrorType_None {
-		return &res, nil
+	if response.ErrorType == pb.ErrorType_None {
+		return response, nil
 	}
 	if response.ErrorType == pb.ErrorType_ClusterStateNotMatch {
 		b.Log.Errorf("failed to forward %s request, cluster state not match: %v", requestType.String(), err)
@@ -382,7 +316,7 @@ func (b *BaseCluster) CheckNodeRouteForServiceName(target string) pb.ErrorType {
 	// The cluster metadata has changed
 	if nodeId != b.SelfNode.Id {
 		b.Log.Errorf("cluster metadata has changed,"+
-			" current node id %s does not match to %s", b.SelfNode.Id, nodeId)
+			" current node id %s does not match to the route node %s", b.SelfNode.Id, nodeId)
 		return pb.ErrorType_MetaDataChanged
 	}
 	return pb.ErrorType_None

@@ -2,8 +2,10 @@ package cluster
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/linkypi/hiraeth.registry/common"
 	"github.com/linkypi/hiraeth.registry/server/config"
+	"strconv"
 )
 
 // MetaData Refer to the implementation of Redis to map machines and slots
@@ -24,6 +26,32 @@ type MetaData struct {
 	// Replica sharding info, record the shard info replicated on each machine
 	Replicas   map[string][]common.Shard `json:"replicas"`
 	CreateTime string                    `json:"createTime"`
+}
+
+func (m MetaData) GetReplicaServerIds(index int) ([]string, error) {
+	serverId := ""
+	for id, shard := range m.Shards {
+		for _, segment := range shard.Segments {
+			if index >= segment.Start && index <= segment.End {
+				serverId = id
+			}
+		}
+	}
+
+	if serverId == "" {
+		return nil, errors.New("server id not found, bucket index " + strconv.Itoa(index))
+	}
+
+	shards, ok := m.Replicas[serverId]
+	if !ok {
+		return nil, errors.New("replica shard not found for server " + serverId)
+	}
+
+	ids := make([]string, 0, len(shards))
+	for _, shard := range shards {
+		ids = append(ids, shard.NodeId)
+	}
+	return ids, nil
 }
 
 func (m MetaData) MarshalJSON() ([]byte, error) {

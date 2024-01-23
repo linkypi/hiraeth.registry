@@ -6,7 +6,7 @@ import (
 	"io"
 
 	"github.com/hashicorp/raft"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 )
 
 // These are requests incoming over gRPC that we need to relay to the Raft engine.

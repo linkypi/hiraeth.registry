@@ -2,11 +2,13 @@ package common
 
 import (
 	"encoding/binary"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/panjf2000/gnet"
 )
 
 const (
 	SlotsCount = 16384
+	RemoteAddr = "RemoteAddr"
 )
 
 var (
@@ -24,3 +26,13 @@ var (
 		InitialBytesToStrip: 4,
 	}
 )
+
+func ConvertReqType(reqType RequestType) pb.RequestType {
+	switch reqType {
+	case Register:
+		return pb.RequestType_Register
+	case Heartbeat:
+		return pb.RequestType_Heartbeat
+	}
+	return pb.RequestType_Unknown
+}

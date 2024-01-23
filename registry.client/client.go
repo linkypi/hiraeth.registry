@@ -3,8 +3,8 @@ package client
 import (
 	"encoding/json"
 	"errors"
-	pb "github.com/linkypi/hiraeth.registry/client/proto"
 	"github.com/linkypi/hiraeth.registry/common"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/panjf2000/gnet/pkg/pool/goroutine"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
@@ -23,8 +23,7 @@ type Client struct {
 	log        *logrus.Logger
 	pool       *goroutine.Pool
 	shutdownCh chan struct{}
-	//connMap    map[string]*Conn
-	codec common.ICodec
+	codec      common.ICodec
 
 	//  only used for pulling metadata when the client is initialized
 	serverAddrs []string
@@ -99,8 +98,8 @@ func (c *Client) SetCodec(codec common.ICodec) {
 	c.codec = codec
 }
 
-func (c *Client) RegisterAsync(serviceName, ip string, port int, callback func(response common.Response, err error)) error {
-	requestKey, err := c.register(serviceName, ip, port)
+func (c *Client) RegisterServiceAsync(serviceName, ip string, port int, callback func(response common.Response, err error)) error {
+	requestKey, err := c.registerService(serviceName, ip, port)
 	if err != nil {
 		c.log.Errorf("failed to async register: %v", err)
 		return err
@@ -134,7 +133,7 @@ func (c *Client) sendHeartbeatsInPeriod() {
 
 			c.asyncWait(requestKey, func(a any, err error) {
 				if err != nil {
-					c.log.Warnf("failed to send heartbeat: %v", err)
+					c.log.Warnf("failed to send heartbeat: %s, %v", requestKey, err)
 				}
 				c.log.Debug("send heartbeat success")
 			})
@@ -142,9 +141,9 @@ func (c *Client) sendHeartbeatsInPeriod() {
 	}
 }
 
-func (c *Client) Register(serviceName, ip string, port int, timeout time.Duration) (common.Response, error) {
+func (c *Client) RegisterService(serviceName, ip string, port int, timeout time.Duration) (common.Response, error) {
 
-	requestKey, err := c.register(serviceName, ip, port)
+	requestKey, err := c.registerService(serviceName, ip, port)
 	if err != nil {
 		return common.Response{}, err
 	}
@@ -166,9 +165,9 @@ func (c *Client) Register(serviceName, ip string, port int, timeout time.Duratio
 	return response, nil
 }
 
-func (c *Client) RegisterWithoutRoute(serviceName, addr, ip string, port int, timeout time.Duration) (common.Response, error) {
+func (c *Client) RegisterServiceWithoutRoute(serviceName, addr, ip string, port int, timeout time.Duration) (common.Response, error) {
 
-	requestKey, err := c.registerWithoutRoute(serviceName, addr, ip, port)
+	requestKey, err := c.registerServiceWithoutRoute(serviceName, addr, ip, port)
 	if err != nil {
 		return common.Response{}, err
 	}
@@ -330,6 +329,10 @@ func (c *Client) fetchMetadata() error {
 	err = proto.Unmarshal(response.Payload, &metadata)
 	if err != nil {
 		c.log.Errorf("failed to decode metadata: %v", err)
+		return err
+	}
+	if metadata.ErrorType != pb.ErrorType_None {
+		c.log.Errorf("failed to fetch metadata: %v", metadata.ErrorType.String())
 		return err
 	}
 	var shards map[string]common.Shard
@@ -494,7 +497,7 @@ func (c *Client) sendHeartbeat(serviceName string, ip string, port int) (string,
 	return reqKey, err
 }
 
-func (c *Client) register(serviceName string, ip string, port int) (string, error) {
+func (c *Client) registerService(serviceName string, ip string, port int) (string, error) {
 	regRequest := pb.RegisterRequest{
 		ServiceName: serviceName,
 		ServiceIp:   ip,
@@ -507,7 +510,7 @@ func (c *Client) register(serviceName string, ip string, port int) (string, erro
 	return c.sendRequest(serverAddr, common.Register, &regRequest)
 }
 
-func (c *Client) registerWithoutRoute(serviceName, serverAddr string, ip string, port int) (string, error) {
+func (c *Client) registerServiceWithoutRoute(serviceName, serverAddr string, ip string, port int) (string, error) {
 	regRequest := pb.RegisterRequest{
 		ServiceName: serviceName,
 		ServiceIp:   ip,

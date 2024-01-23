@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"github.com/hashicorp/raft"
 	boltdb "github.com/hashicorp/raft-boltdb"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/cluster/network"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"os"
@@ -45,7 +45,7 @@ func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server, clusterCo
 
 	baseDir := dataDir + "/" + "raft"
 	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
-		err = os.MkdirAll(baseDir, 0755)
+		err = os.MkdirAll(baseDir, 0644)
 		if err != nil {
 			return nil, fmt.Errorf(`create raft data dir [%s] failed: %v`, baseDir, err)
 		}
@@ -73,6 +73,7 @@ func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server, clusterCo
 		return nil, fmt.Errorf("raft.NewRaft: %v", err)
 	}
 
+	// 有可能 raft 集群已经存在, 此时需要判断原有集群节点与当前已经连接的节点是否同在一个集群
 	cfg := raft.Configuration{Servers: peers}
 
 	// use boltDb to read the value of the key [CurrentTerm] to determine whether a cluster exists

@@ -3,10 +3,10 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/cluster/network"
 	"github.com/linkypi/hiraeth.registry/server/config"
 	"github.com/linkypi/hiraeth.registry/server/log"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
 	"github.com/linkypi/hiraeth.registry/server/slot"
 	"strconv"
 	"sync"

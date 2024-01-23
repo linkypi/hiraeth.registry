@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/linkypi/hiraeth.registry/common"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/cluster"
 	"github.com/linkypi/hiraeth.registry/server/config"
 	"github.com/linkypi/hiraeth.registry/server/log"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"strconv"
 )

@@ -3,7 +3,7 @@ package test
 import (
 	"fmt"
 	"github.com/golang/protobuf/proto"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"testing"
 )
 

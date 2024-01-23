@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 )
 
 // These are calls from the Raft engine that we need to send out over gRPC.

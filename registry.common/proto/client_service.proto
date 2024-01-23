@@ -1,0 +1,60 @@
+syntax = "proto3";
+import "google/protobuf/empty.proto";
+option go_package = "../proto";
+import "error_type.proto";
+
+
+service ClientService {
+  rpc Register(RegisterRequest) returns (RegisterResponse) {}
+  rpc SubScribe(SubRequest)returns(google.protobuf.Empty){}
+  rpc PublishServiceChanged(ServiceChangedRequest)returns(google.protobuf.Empty){}
+  rpc FetchServiceInstances(FetchServiceRequest)returns(FetchServiceResponse){}
+  rpc FetchMetadata(google.protobuf.Empty)returns(FetchMetadataResponse){}
+  rpc SendHeartbeat(HeartbeatRequest)returns(google.protobuf.Empty){}
+}
+
+message FetchMetadataResponse {
+  string shards = 1;
+  map<string, string> nodes = 2;
+  ErrorType errorType = 3;
+}
+message RegisterRequest {
+  string serviceName = 1;
+  string  serviceIp = 2;
+  int32  servicePort = 3;
+}
+message RegisterResponse {
+  ErrorType errorType = 1;
+  bool success = 2;
+}
+enum SubType {
+  NoneSubPub = 0;
+  Subscribe = 1;
+  UnSubscribe = 2;
+}
+message SubRequest {
+  SubType subType = 1;
+  string serviceName = 2;
+  string serviceAddr = 3;
+}
+message ServiceChangedRequest {
+  string serviceName = 1;
+}
+message FetchServiceResponse {
+  string serviceName = 1;
+  repeated ServiceInstance serviceInstances = 2;
+}
+message FetchServiceRequest {
+  string serviceName = 1;
+}
+message ServiceInstance {
+  string serviceName = 1;
+  string  serviceIp = 2;
+  int32  servicePort = 3;
+}
+
+message HeartbeatRequest {
+  string serviceName = 1;
+  string  serviceIp = 2;
+  int32  servicePort = 3;
+}

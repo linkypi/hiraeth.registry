@@ -2,11 +2,11 @@ package tcp
 
 import (
 	common "github.com/linkypi/hiraeth.registry/common"
+	cpb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/api/handler"
 	"github.com/linkypi/hiraeth.registry/server/cluster"
 	"github.com/linkypi/hiraeth.registry/server/config"
 	"github.com/linkypi/hiraeth.registry/server/log"
-	cpb "github.com/linkypi/hiraeth.registry/server/proto"
 	"github.com/linkypi/hiraeth.registry/server/slot"
 	"github.com/panjf2000/gnet"
 	"github.com/panjf2000/gnet/pkg/logging"
@@ -30,36 +30,32 @@ type Server struct {
 	Ch    chan RequestWrapper
 	codec gnet.ICodec
 
+	syner          *cluster.Syner
 	heartbeatSec   int
 	workerPool     *goroutine.Pool
-	requestHandler handler.RequestHandlerFactory
+	handlerFactory *handler.RequestHandlerFactory
 }
 
-func NewClientTcpServer(addr string, codec gnet.ICodec, cluster *cluster.Cluster, startupMode config.StartUpMode,
-	slotManager *slot.Manager, shutDownCh chan struct{}) *Server {
+func NewClientTcpServer(addr string, codec gnet.ICodec, cl *cluster.Cluster, startupMode config.StartUpMode,
+	slotManager *slot.Manager, shutDownCh chan struct{}, handlerFactory *handler.RequestHandlerFactory) *Server {
 
 	netManager := NewNetManager()
-	serviceImpl := handler.ServiceImpl{
-		SlotManager: slotManager,
-		Cluster:     cluster, Log: log.Log,
-		StartUpMode: startupMode}
-	handlerFactory := handler.NewHandlerFactory(&serviceImpl, log.Log)
+	syner := cluster.NewSyner(log.Log, cl)
 	tcpServer := Server{
 		log:            log.Log,
 		addr:           addr,
 		codec:          codec,
+		syner:          syner,
 		Ch:             make(chan RequestWrapper, 1000),
-		cluster:        cluster,
+		cluster:        cl,
 		slotManager:    slotManager,
 		startUpMode:    startupMode,
 		netManager:     netManager,
 		heartbeatSec:   3,
 		workerPool:     goroutine.Default(),
 		shutDownCh:     shutDownCh,
-		requestHandler: handlerFactory,
+		handlerFactory: handlerFactory,
 	}
-	serviceImpl.OnSubEvent = tcpServer.publishServiceChanged
-
 	return &tcpServer
 }
 
@@ -80,9 +76,15 @@ func (s *Server) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 	s.log.Infof("client connection is closed, error: %v", err)
 	s.netManager.RemoveConn(c.RemoteAddr().String())
 
-	reqHandler := s.requestHandler.GetHandlerByRequestType(common.Subscribe)
-	subHandler := reqHandler.(*handler.SubHandler)
-	subHandler.UnSub(c.RemoteAddr().String())
+	subRequest := cpb.SubRequest{SubType: cpb.SubType_UnSubscribe, ServiceAddr: c.RemoteAddr().String()}
+	bytes, err := common.EncodePb(&subRequest)
+	if err != nil {
+		s.log.Errorf("encode sub request failed, error: %v", err)
+		return
+	}
+	msg := common.Message{RequestType: common.Subscribe, Payload: bytes, RequestId: uint64(common.GenerateId())}
+	request := common.Request{Message: msg}
+	_, _, _ = s.handlerFactory.Handle(request, c)
 
 	return
 }
@@ -103,7 +105,7 @@ func (s *Server) React(buffer []byte, c gnet.Conn) (out []byte, action gnet.Acti
 	return
 }
 
-func (s *Server) publishServiceChanged(connIds []string, serviceName string, instances []common.ServiceInstance) {
+func (s *Server) PublishServiceChanged(connIds []string, serviceName string, instances []common.ServiceInstance) {
 	if s.netManager == nil {
 		return
 	}

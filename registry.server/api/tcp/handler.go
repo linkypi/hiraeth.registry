@@ -3,7 +3,6 @@ package tcp
 import (
 	"encoding/json"
 	"github.com/linkypi/hiraeth.registry/common"
-	"github.com/linkypi/hiraeth.registry/server/api/handler"
 	"github.com/panjf2000/gnet"
 	"time"
 )
@@ -42,13 +41,9 @@ func (s *Server) handle(wrapper RequestWrapper) {
 			return
 		}
 
-		reqHandler := s.requestHandler.GetHandlerByRequestType(req.RequestType)
-		if reqHandler != nil {
-			_ = s.workerPool.Submit(func() {
-				s.doHandle(reqHandler, req, wrapper.Conn)
-			})
-			return
-		}
+		_ = s.workerPool.Submit(func() {
+			s.doHandle(req, wrapper.Conn)
+		})
 		return
 	}
 
@@ -73,21 +68,25 @@ func (s *Server) handleResponse(res common.Response, c gnet.Conn) {
 	s.log.Debugf("reply client response: %s, bytes: %d", res.RequestType.String(), 0)
 }
 
-func (s *Server) doHandle(handler handler.RequestHandler, request common.Request, conn gnet.Conn) {
+func (s *Server) doHandle(request common.Request, conn gnet.Conn) {
 
 	s.log.Debugf("received request, req type: %s, req id: %d", request.RequestType.String(), request.RequestId)
-
-	response := handler.Handle(request, conn)
-	bytes, err := response.ToBytes()
-
-	jsonStr, _ := json.Marshal(request)
+	res, forwarded, err := s.handlerFactory.Handle(request, conn)
 	if err != nil {
-		s.log.Debugf("encode message error, msg: %s, %v", jsonStr, err)
+		s.log.Warnf("encode response error: %v", err)
+		return
 	}
-
+	jsonStr, _ := json.Marshal(request)
+	bytes, err := res.ToBytes()
 	err = conn.AsyncWrite(bytes)
 	if err != nil {
 		s.log.Errorf("async send message error, msg: %s, %v", jsonStr, err)
 	}
-	s.log.Debugf("reply client request: %s, bytes: %d", request.RequestType.String(), len(bytes))
+	s.log.Debugf("reply client request: %s, id: %d, bytes: %d", request.RequestType.String(), request.RequestId, len(bytes))
+
+	// Check whether the processing results need to be replicated to replicas
+	// After the primary shard data is updated, it needs to be synchronized asynchronously to its replica shard
+	if !forwarded {
+		s.syner.MaybeForwardToReplicas(request, *res)
+	}
 }

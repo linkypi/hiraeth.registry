@@ -2,7 +2,7 @@ package raft
 
 import (
 	"github.com/hashicorp/raft"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 

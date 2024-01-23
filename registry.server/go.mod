@@ -9,14 +9,14 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/raft v1.6.0
 	github.com/hashicorp/raft-boltdb v0.0.0-20231211162105-6c830fa4535e
+	github.com/json-iterator/go v1.1.12
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
 	github.com/linkypi/hiraeth.registry/common v1.0.0
 	github.com/panjf2000/gnet v1.6.7
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/sourcegraph/conc v0.3.0
-	google.golang.org/appengine v1.6.8
-	google.golang.org/grpc v1.57.0
+	google.golang.org/grpc v1.60.1
 	google.golang.org/protobuf v1.31.0
 )
 
@@ -33,7 +33,6 @@ require (
 	github.com/hashicorp/go-msgpack v1.1.5 // indirect
 	github.com/hashicorp/go-msgpack/v2 v2.1.1 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
-	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/lestrrat-go/strftime v1.0.6 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
@@ -47,6 +46,7 @@ require (
 	golang.org/x/net v0.16.0 // indirect
 	golang.org/x/sys v0.16.0 // indirect
 	golang.org/x/text v0.13.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20230525234030-28d5490b6b19 // indirect
+	google.golang.org/appengine v1.6.8 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20231002182017-d307bd883b97 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )

@@ -106,7 +106,18 @@ func NewRequest(requestType RequestType, payload []byte) Request {
 		Timestamp:   time.Now().Unix(),
 		RequestId:   uint64(GenerateId()),
 	}
-	return Request{message}
+	return Request{Message: message}
+}
+
+func NewResponseWithReqType(requestId uint64, payload []byte, requestType RequestType) Response {
+	message := Message{
+		MessageType: ResponseMsg,
+		Payload:     payload,
+		RequestType: requestType,
+		Timestamp:   time.Now().Unix(),
+		RequestId:   requestId,
+	}
+	return Response{Message: message}
 }
 
 func NewResponse(requestId uint64, payload []byte) Response {
@@ -130,6 +141,29 @@ func NewErrResponse(requestId uint64, code, msg string) Response {
 		Success: false,
 		Code:    code,
 		Msg:     msg,
+	}
+}
+
+func NewErrRes(msg string) Response {
+	message := Message{
+		MessageType: ResponseMsg,
+		Timestamp:   time.Now().Unix(),
+	}
+	return Response{
+		Message: message,
+		Success: false,
+		Msg:     msg,
+	}
+}
+
+func NewOkRes() Response {
+	message := Message{
+		MessageType: ResponseMsg,
+		Timestamp:   time.Now().Unix(),
+	}
+	return Response{
+		Message: message,
+		Success: true,
 	}
 }
 
@@ -157,6 +191,18 @@ func NewOkResponseWithPayload(requestId uint64, requestType RequestType, payload
 	return Response{
 		Message: message,
 		Success: true,
+	}
+}
+
+func NewErrResponseWithErrType(errType uint8) Response {
+	message := Message{
+		MessageType: ResponseMsg,
+		Timestamp:   time.Now().Unix(),
+	}
+	return Response{
+		ErrorType: errType,
+		Message:   message,
+		Success:   false,
 	}
 }
 
@@ -283,6 +329,9 @@ func Decode(data []byte, obj any) error {
 
 // Encode The efficiency of encoding and decoding with gob is low, and optimization will be considered later
 func Encode(obj any) ([]byte, error) {
+	if obj == nil {
+		return nil, errors.New("obj is nil")
+	}
 	buf := new(bytes.Buffer)
 	enc := gob.NewEncoder(buf)
 	if err := enc.Encode(obj); err != nil {
@@ -323,7 +372,7 @@ func DecodeToResponse(buffer []byte) (*Response, error) {
 	return msg, nil
 }
 
-func DecodeToPb(buffer []byte, pbm proto.Message) error {
+func DecodeToPb[T proto.Message](buffer []byte, pbm T) error {
 	err := proto.Unmarshal(buffer, pbm)
 	if err != nil {
 		return err
@@ -331,7 +380,7 @@ func DecodeToPb(buffer []byte, pbm proto.Message) error {
 	return nil
 }
 
-func EncodePb(pbm proto.Message) ([]byte, error) {
+func EncodePb[T proto.Message](pbm T) ([]byte, error) {
 	bys, err := proto.Marshal(pbm)
 	if err != nil {
 		return bys, err

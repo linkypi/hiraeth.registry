@@ -232,6 +232,9 @@ func (s *ServiceRegistry) maybePublishChangedService(serviceName string, list []
 					list = value.([]common.ServiceInstance)
 				}
 			}
+			if len(list) == 0 {
+				return
+			}
 			go s.trigger(connIds, serviceName, list)
 		}
 	}

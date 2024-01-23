@@ -2,19 +2,22 @@ package rpc
 
 import (
 	"context"
-	cluster2 "github.com/linkypi/hiraeth.registry/server/cluster"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
+	cluster "github.com/linkypi/hiraeth.registry/server/cluster"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
+	"github.com/linkypi/hiraeth.registry/server/log"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type ClusterRpcService struct {
-	cluster *cluster2.Cluster
+	cluster *cluster.Cluster
 	config  config.Config
+	syner   *cluster.Syner
 }
 
-func (c *ClusterRpcService) SetCluster(cluster *cluster2.Cluster) {
-	c.cluster = cluster
+func (c *ClusterRpcService) SetCluster(cl *cluster.Cluster) {
+	c.cluster = cl
+	c.syner = cluster.NewSyner(log.Log, c.cluster)
 }
 func NewCRpcService(conf config.Config) *ClusterRpcService {
 	return &ClusterRpcService{

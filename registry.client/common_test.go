@@ -1,8 +1,8 @@
 package client
 
 import (
-	pb "github.com/linkypi/hiraeth.registry/client/proto"
 	"github.com/linkypi/hiraeth.registry/common"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"testing"
 	"time"
 )
@@ -32,7 +32,7 @@ func TestAsyncRegisterWithoutRoute(t *testing.T) {
 	shutdownCh := make(chan struct{})
 	addr := "127.0.0.1:22663"
 	client := initClient(addr, shutdownCh)
-	res, err := client.RegisterWithoutRoute("my-service", addr, "127.0.0.1", 7380, time.Second*60)
+	res, err := client.RegisterServiceWithoutRoute("my-service", addr, "127.0.0.1", 7380, time.Second*60)
 	if err != nil {
 		t.Errorf("register error: %v", err)
 		client.Close()
@@ -104,7 +104,6 @@ func TestSubscribe(t *testing.T) {
 		case <-client.shutdownCh:
 			client.Close()
 			return
-		default:
 		}
 	}
 
@@ -121,7 +120,7 @@ func subscribe(client *Client, service string) bool {
 
 func registerAsync(serviceName, ip string, port int, client *Client) {
 	logger := common.Log
-	_ = client.RegisterAsync(serviceName, ip, port, func(res common.Response, err2 error) {
+	_ = client.RegisterServiceAsync(serviceName, ip, port, func(res common.Response, err2 error) {
 		if err2 != nil {
 			logger.Errorf("failed to register service: %v", err2)
 			return
@@ -159,7 +158,7 @@ func initClient(serverAddr string, shutdownCh chan struct{}) *Client {
 func TestSyncRegisterUsingTcp(t *testing.T) {
 	shutdownCh := make(chan struct{})
 	client := initClient("127.0.0.1:22662", shutdownCh)
-	res, err := client.Register("my-service", "127.0.0.1", 2345, time.Second*30)
+	res, err := client.RegisterService("my-service", "127.0.0.1", 2345, time.Second*30)
 	if err != nil {
 		close(shutdownCh)
 		t.Fatal("failed to register service", err)

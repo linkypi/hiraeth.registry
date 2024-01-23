@@ -2,7 +2,7 @@ package test
 
 import (
 	"context"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"google.golang.org/grpc"
 	"log"
 	"testing"

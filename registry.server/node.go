@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"github.com/linkypi/hiraeth.registry/common"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
+	"github.com/linkypi/hiraeth.registry/server/api/handler"
 	"github.com/linkypi/hiraeth.registry/server/api/http"
 	"github.com/linkypi/hiraeth.registry/server/api/tcp"
 	"github.com/linkypi/hiraeth.registry/server/cluster"
@@ -10,8 +12,8 @@ import (
 	"github.com/linkypi/hiraeth.registry/server/cluster/rpc"
 	"github.com/linkypi/hiraeth.registry/server/config"
 	"github.com/linkypi/hiraeth.registry/server/log"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
 	"github.com/linkypi/hiraeth.registry/server/raft"
+	"github.com/linkypi/hiraeth.registry/server/service"
 	"github.com/linkypi/hiraeth.registry/server/slot"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -94,16 +96,19 @@ func (n *Node) Start(conf config.Config) {
 	}
 }
 
-func (n *Node) startClientReceiver(conf config.Config, myCluster *cluster.Cluster, slotManager *slot.Manager) {
+func (n *Node) startClientReceiver(conf config.Config, cl *cluster.Cluster, slotManager *slot.Manager) {
 
 	codec := &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
 
+	serviceImpl := service.RegistryImpl{Cluster: cl, Log: log.Log, StartUpMode: conf.StartupMode}
+	handlerFactory := handler.NewHandlerFactory(cl, &serviceImpl, log.Log)
+
 	clientTcpServer := tcp.NewClientTcpServer(n.selfNode.GetExternalTcpAddr(), codec,
-		myCluster, conf.StartupMode, slotManager, n.shutDownCh)
+		cl, conf.StartupMode, slotManager, n.shutDownCh, handlerFactory)
+	serviceImpl.OnSubEvent = clientTcpServer.PublishServiceChanged
 	go clientTcpServer.Start(n.selfNode.Id)
 
-	clientRestServer := http.NewClientRestServer(n.selfNode.GetExternalHttpAddr(), slotManager,
-		myCluster, conf.StartupMode, n.shutDownCh)
+	clientRestServer := http.NewClientRestServer(n.selfNode.GetExternalHttpAddr(), slotManager, handlerFactory, n.shutDownCh)
 	go clientRestServer.Start()
 }
 

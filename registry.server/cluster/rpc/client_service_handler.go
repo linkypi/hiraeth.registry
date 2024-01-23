@@ -3,16 +3,18 @@ package rpc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/linkypi/hiraeth.registry/common"
-	pb "github.com/linkypi/hiraeth.registry/server/proto"
+	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"google.golang.org/protobuf/proto"
 )
 
 func (c *ClusterRpcService) ForwardClientRequest(ctx context.Context, req *pb.ForwardCliRequest) (res *pb.ForwardCliResponse, e error) {
 	defer func() {
 		if err := recover(); err != nil {
-			c.cluster.Log.Errorf("handle forward reqeuest panic: %v", err)
-			e = errors.New("failed forward request, internal error")
+			msg := fmt.Sprintf("failed handle forward reqeuest: %v", err)
+			c.cluster.Log.Error(msg)
+			e = errors.New(msg)
 		}
 	}()
 	forwardRes := &pb.ForwardCliResponse{
@@ -22,7 +24,7 @@ func (c *ClusterRpcService) ForwardClientRequest(ctx context.Context, req *pb.Fo
 		Term:      c.cluster.Leader.Term,
 	}
 
-	c.cluster.Log.Debugf(">>>>>>>>>>>>>>>>>>>>  handle forward reqeuest: %s ", req.RequestType.String())
+	c.cluster.Log.Debugf(" handle forward reqeuest: %s ", req.RequestType.String())
 	// Check whether they belong to the same cluster
 	errorType := c.cluster.CheckClusterInfo(req.ClusterId, req.LeaderId, req.Term)
 	if errorType != pb.ErrorType_None {
@@ -31,12 +33,24 @@ func (c *ClusterRpcService) ForwardClientRequest(ctx context.Context, req *pb.Fo
 		return forwardRes, nil
 	}
 
+	response, err := c.doLogic(req, errorType, res, forwardRes)
+	if response.ErrorType == pb.ErrorType_None && !req.SyncReplica {
+		c.syner.MaybeForwardToReplicasForGRpc(req, response)
+	}
+	return response, err
+}
+
+func (c *ClusterRpcService) doLogic(req *pb.ForwardCliRequest, errorType pb.ErrorType, res *pb.ForwardCliResponse, forwardRes *pb.ForwardCliResponse) (*pb.ForwardCliResponse, error) {
 	if req.RequestType == pb.RequestType_Register {
 		var request pb.RegisterRequest
 		err := proto.Unmarshal(req.Payload, &request)
 		if err != nil {
 			c.cluster.Log.Errorf("failed handle forward %s reqeuest: %v", req.RequestType.String(), err)
 			return nil, err
+		}
+		if req.SyncReplica {
+			res = c.doRegisterService(&request)
+			return res, nil
 		}
 		// Check whether the metadata of the cluster has changed
 		errorType = c.cluster.CheckNodeRouteForServiceName(request.ServiceName)
@@ -54,6 +68,10 @@ func (c *ClusterRpcService) ForwardClientRequest(ctx context.Context, req *pb.Fo
 		if err != nil {
 			c.cluster.Log.Errorf("failed handle forward %s reqeuest: %v", req.RequestType.String(), err)
 			return nil, err
+		}
+		if req.SyncReplica {
+			res = c.doServiceHeartbeat(&request)
+			return res, nil
 		}
 		// Check whether the metadata of the cluster has changed
 		errorType = c.cluster.CheckNodeRouteForServiceName(request.ServiceName)
