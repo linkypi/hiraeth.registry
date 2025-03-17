@@ -1,4 +1,4 @@
-先前出于好奇自我实现了一个基于Java实现的分布式微服务注册中心 [my-registry](https://github.com/linkypi/my-registry). 最近迷上了go, 又刚好在B站对 raft 算法做了下了解, 碰巧就想到 my-registry 正是需要该算法来实现leader选举以及数据一致性保证. 于是就想着使用go基于etcd raft来实现一遍, 虽然etcd已经将raft算法独立封装成lib但是想基于它实现自己的功能还是存在不少难度:
+先前出于好奇自我实现了一个基于Java实现的分布式微服务注册中心 [my-registry](https://github.com/linkypi/my-registry). 最近在B站对 raft 算法重新做了下了解, 碰巧就想到 my-registry 正是需要该算法来实现leader选举以及数据一致性保证. 于是就想着使用go基于etcd raft来实现一遍, 虽然etcd已经将raft算法独立封装成lib但是想基于它实现自己的功能还是存在不少难度:
 
 1. 传输层 transport 仅支持 http, 虽然提供了 transport 相关接口, 但想改用grpc则需调整不少代码, 文档中可用信息很少.
 2. 再一个是etcd raft 并没有提供一个通知机制来告知开发者 leader 已发生变更, 如集群异常导致重新选出leader后需要对数据重新分配或者调整数据分片
