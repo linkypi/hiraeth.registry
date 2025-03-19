@@ -2,9 +2,8 @@ package network
 
 import (
 	"github.com/hashicorp/go-multierror"
+	"github.com/linkypi/hiraeth.registry/common"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	"github.com/linkypi/hiraeth.registry/server/log"
-	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/connectivity"
 	"strings"
 	"sync"
@@ -17,7 +16,6 @@ import (
 )
 
 type Manager struct {
-	log          *logrus.Logger
 	LocalAddress raft.ServerAddress
 
 	RpcChan          chan raft.RPC
@@ -49,7 +47,6 @@ type conn struct {
 func NewNetworkManager(localAddress string) *Manager {
 	address := raft.ServerAddress(localAddress)
 	m := &Manager{
-		log:          log.Log,
 		LocalAddress: address,
 		RpcChan:      make(chan raft.RPC),
 		Connections:  map[string]*conn{},
@@ -88,11 +85,11 @@ func (net *Manager) GetRaftClient(id string) (*pb.RaftTransportClient, error) {
 
 	defer func() {
 		if err := recover(); err != nil {
-			net.log.Errorf("panic when get raft client, id: %s, err: %v", id, err)
+			common.Errorf("panic when get raft client, id: %s, err: %v", id, err)
 		}
 	}()
 	if conn.raftClient == nil {
-		net.log.Warnf("raft connection to node %s is nil, rpc con: %s.", id, conn.grpcConn.Target())
+		common.Warnf("raft connection to node %s is nil, rpc con: %s.", id, conn.grpcConn.Target())
 	}
 	return conn.raftClient, nil
 }
@@ -149,7 +146,7 @@ func (net *Manager) AddConn(id, addr string, grpcConn *grpc.ClientConn,
 		con.mtx.Lock()
 		defer con.mtx.Unlock()
 		net.Connections[id] = con
-		net.log.Infof("connection to node %s is established.", id)
+		common.Infof("connection to node %s is established.", id)
 		return
 	}
 
@@ -160,7 +157,7 @@ func (net *Manager) AddConn(id, addr string, grpcConn *grpc.ClientConn,
 	con.grpcConn = grpcConn
 	con.raftClient = raftClient
 	con.PeerClient = internalServClient
-	net.log.Infof("update connection to node %s.", id)
+	common.Infof("update connection to node %s.", id)
 
 }
 
@@ -225,17 +222,17 @@ func (net *Manager) CheckConnClosed(shutDownCh chan struct{}, reconnect func(str
 
 			if time.Now().Sub(lastLogTime).Seconds() > 30 {
 				lastLogTime = time.Now()
-				net.log.Debugf("connection state for %s: %s", id, state.String())
+				common.Debugf("connection state for %s: %s", id, state.String())
 			}
 
 			if state == connectivity.TransientFailure || state == connectivity.Shutdown {
-				net.log.Warnf("Connection to node %s is closed or in transient failure state.", id)
+				common.Warnf("Connection to node %s is closed or in transient failure state.", id)
 				//net.ConnectionsMtx.Lock()
 				//// Prevent goroutines from concurrently accessing disconnected connections
 				//con.mtx.Lock()
 				//err := con.grpcConn.Close()
 				//if err != nil {
-				//	net.log.Errorf("Error closing connection: %s", err)
+				//	common.Errorf("Error closing connection: %s", err)
 				//	continue
 				//}
 				//con.raftClient = nil

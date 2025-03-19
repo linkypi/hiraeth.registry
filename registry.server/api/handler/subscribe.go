@@ -38,7 +38,7 @@ func (r *SubHandler) Handle(req any, bucket *slot.Bucket, ctx context.Context) (
 	if request.SubType == pb.SubType_Subscribe {
 		err := r.serviceImpl.Subscribe(bucket, request.ServiceName, addr)
 		if err != nil {
-			r.log.Errorf("failed to subscribe service: %v", err)
+			common.Errorf("failed to subscribe service: %v", err)
 			//errType := 0
 			//if err == common.ErrorMetadataChanged {
 			//	errType = int(pb.ErrorType_MetaDataChanged.Number())

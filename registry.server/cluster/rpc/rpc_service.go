@@ -5,7 +5,6 @@ import (
 	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	cluster "github.com/linkypi/hiraeth.registry/server/cluster"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	"github.com/linkypi/hiraeth.registry/server/log"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -17,7 +16,7 @@ type ClusterRpcService struct {
 
 func (c *ClusterRpcService) SetCluster(cl *cluster.Cluster) {
 	c.cluster = cl
-	c.syner = cluster.NewSyner(log.Log, c.cluster)
+	c.syner = cluster.NewSyner(c.cluster)
 }
 func NewCRpcService(conf config.Config) *ClusterRpcService {
 	return &ClusterRpcService{

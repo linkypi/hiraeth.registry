@@ -13,7 +13,7 @@ func (c *ClusterRpcService) ForwardClientRequest(ctx context.Context, req *pb.Fo
 	defer func() {
 		if err := recover(); err != nil {
 			msg := fmt.Sprintf("failed handle forward reqeuest: %v", err)
-			c.cluster.Log.Error(msg)
+			common.Error(msg)
 			e = errors.New(msg)
 		}
 	}()
@@ -24,12 +24,12 @@ func (c *ClusterRpcService) ForwardClientRequest(ctx context.Context, req *pb.Fo
 		Term:      c.cluster.Leader.Term,
 	}
 
-	c.cluster.Log.Debugf(" handle forward reqeuest: %s ", req.RequestType.String())
+	common.Debugf(" handle forward reqeuest: %s ", req.RequestType.String())
 	// Check whether they belong to the same cluster
 	errorType := c.cluster.CheckClusterInfo(req.ClusterId, req.LeaderId, req.Term)
 	if errorType != pb.ErrorType_None {
 		forwardRes.ErrorType = errorType
-		c.cluster.Log.Errorf("failed handle forward %s reqeuest: %v", req.RequestType.String(), errorType)
+		common.Errorf("failed handle forward %s reqeuest: %v", req.RequestType.String(), errorType)
 		return forwardRes, nil
 	}
 
@@ -45,7 +45,7 @@ func (c *ClusterRpcService) doLogic(req *pb.ForwardCliRequest, errorType pb.Erro
 		var request pb.RegisterRequest
 		err := proto.Unmarshal(req.Payload, &request)
 		if err != nil {
-			c.cluster.Log.Errorf("failed handle forward %s reqeuest: %v", req.RequestType.String(), err)
+			common.Errorf("failed handle forward %s reqeuest: %v", req.RequestType.String(), err)
 			return nil, err
 		}
 		if req.SyncReplica {
@@ -66,7 +66,7 @@ func (c *ClusterRpcService) doLogic(req *pb.ForwardCliRequest, errorType pb.Erro
 		var request pb.HeartbeatRequest
 		err := proto.Unmarshal(req.Payload, &request)
 		if err != nil {
-			c.cluster.Log.Errorf("failed handle forward %s reqeuest: %v", req.RequestType.String(), err)
+			common.Errorf("failed handle forward %s reqeuest: %v", req.RequestType.String(), err)
 			return nil, err
 		}
 		if req.SyncReplica {

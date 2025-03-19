@@ -46,12 +46,12 @@ func (b *BaseCluster) startRaftNode(dataDir string) {
 
 	raftFsm, err := raftNode.Start(selfNode.Id, dataDir, peers, *b.Config, b.notifyCh, propFsm)
 	if err != nil {
-		b.Log.Errorf("failed to start raft node: %v", err.Error())
+		common.Errorf("failed to start raft node: %v", err.Error())
 		b.Shutdown()
 		return
 	}
 	b.Raft = raftFsm
-	b.Log.Infof("raft node started.")
+	common.Infof("raft node started.")
 }
 
 func (b *BaseCluster) UpdateLeader(term uint64, id, addr string) {
@@ -76,7 +76,7 @@ func (b *BaseCluster) notifyAllNodesLeaderShipTransferStatus(clusterNodes []conf
 	})
 
 	if !success {
-		b.Log.Errorf("failed to notify trasnfer leadership completed to %d of %d nodes", total-int(numOfAck), total)
+		common.Errorf("failed to notify trasnfer leadership completed to %d of %d nodes", total-int(numOfAck), total)
 		return false
 	}
 
@@ -104,7 +104,7 @@ func (b *BaseCluster) verifyAllFollowers() (int, []config.NodeInfo, int) {
 func (b *BaseCluster) verifyFollower(addr string) bool {
 	con, err := b.Manager.GetConnByAddr(addr)
 	if err != nil {
-		b.Log.Warnf("failed to verify follower, %s", addr)
+		common.Warnf("failed to verify follower, %s", addr)
 		return false
 	}
 
@@ -114,16 +114,16 @@ func (b *BaseCluster) verifyFollower(addr string) bool {
 	}
 	response, err := (*con.PeerClient).GetFollowerInfo(context.Background(), &request)
 	if err != nil {
-		b.Log.Errorf("failed to verify follower, get follower info error: %s", err)
+		common.Errorf("failed to verify follower, get follower info error: %s", err)
 		return false
 	}
 	if response.LeaderId != b.Leader.Id {
-		b.Log.Errorf("failed to verify follower, leader id not match, current leader id: %s,"+
+		common.Errorf("failed to verify follower, leader id not match, current leader id: %s,"+
 			" follower %s leader id: %s", b.Leader.Id, addr, response.LeaderId)
 		return false
 	}
 	if response.Term != b.Leader.Term {
-		b.Log.Errorf("failed to verify follower, term not match, current term: %d,"+
+		common.Errorf("failed to verify follower, term not match, current term: %d,"+
 			" follower %s term: %d", b.Leader.Term, addr, response.Term)
 		return false
 	}
@@ -145,31 +145,31 @@ func (b *BaseCluster) notifyLeaderShipTransferStatus(node config.NodeInfo, statu
 	err := common.WaitUntilExecSuccess(time.Second*3, b.ShutDownCh, func(...any) error {
 		rpcClient := b.Manager.GetInterRpcClient(node.Id)
 		if rpcClient == nil {
-			b.Log.Warnf("failed to notify leadership transfer to [%s], connection not ready: %s", status.String(), node.Id)
+			common.Warnf("failed to notify leadership transfer to [%s], connection not ready: %s", status.String(), node.Id)
 			return errors.New("failed to get rpc client")
 		}
 		response, err := (*rpcClient).TransferLeadership(context.Background(), &request)
 
 		if response.ErrorType == pb.ErrorType_ClusterStateNotMatch {
-			b.Log.Errorf("[leader] failed to trasnfer leadership [%s] to %s:%s, cluster state not match: %s",
+			common.Errorf("[leader] failed to trasnfer leadership [%s] to %s:%s, cluster state not match: %s",
 				status.String(), node.Id, node.Addr, response.ClusterState)
 			return nil
 		}
 		if response.ErrorType == pb.ErrorType_LeaderIdNotMatch {
-			b.Log.Errorf("[leader] failed to trasnfer leadership [%s] to %s:%s, leader id not match, "+
+			common.Errorf("[leader] failed to trasnfer leadership [%s] to %s:%s, leader id not match, "+
 				"current leader id: %s, remote leader id: %s",
 				status.String(), node.Id, node.Addr, b.Leader.Id, response.LeaderId)
 			return nil
 		}
 		if response.ErrorType == pb.ErrorType_TermNotMatch {
-			b.Log.Errorf("[leader] failed to trasnfer leadership [%s] to %s:%s, term not match, "+
+			common.Errorf("[leader] failed to trasnfer leadership [%s] to %s:%s, term not match, "+
 				"current term: %d, remote term: %d",
 				status.String(), node.Id, node.Addr, b.Leader.Term, response.Term)
 			return nil
 		}
 
 		if err != nil {
-			b.Log.Errorf("failed to notify trasnfer leadership %s to %s:%s, will try agian, %v", status.String(), node.Id, node.Addr, err)
+			common.Errorf("failed to notify trasnfer leadership %s to %s:%s, will try agian, %v", status.String(), node.Id, node.Addr, err)
 			time.Sleep(200 * time.Millisecond)
 			return err
 		}
@@ -177,7 +177,7 @@ func (b *BaseCluster) notifyLeaderShipTransferStatus(node config.NodeInfo, statu
 	})
 
 	if err != nil {
-		b.Log.Errorf("failed to notify trasnfer leadership %s to %s:%s, %v", status.String(), node.Id, node.Addr, err)
+		common.Errorf("failed to notify trasnfer leadership %s to %s:%s, %v", status.String(), node.Id, node.Addr, err)
 		return false
 	}
 	return true
@@ -191,7 +191,7 @@ func (b *BaseCluster) publishMetaDataToAllNodes(metaData MetaData) bool {
 	})
 
 	if !success {
-		b.Log.Errorf("failed to publish metadata to %d of %d nodes", len(nodes)-int(numOfAck), len(nodes))
+		common.Errorf("failed to publish metadata to %d of %d nodes", len(nodes)-int(numOfAck), len(nodes))
 		return false
 	}
 
@@ -202,7 +202,7 @@ func (b *BaseCluster) publishMetaData(node config.NodeInfo, metaData MetaData) b
 
 	jsonBytes, err := json.Marshal(metaData)
 	if err != nil {
-		b.Log.Errorf("marshal meta data failed: %v", err)
+		common.Errorf("marshal meta data failed: %v", err)
 		return false
 	}
 	request := pb.PublishMetadataRequest{
@@ -215,28 +215,28 @@ func (b *BaseCluster) publishMetaData(node config.NodeInfo, metaData MetaData) b
 	err = common.WaitUntilExecSuccess(time.Second*3, b.ShutDownCh, func(...any) error {
 		resp, err := (*rpcClient).PublishMetadata(context.Background(), &request)
 		if resp.ErrorType == pb.ErrorType_ClusterStateNotMatch {
-			b.Log.Errorf("failed to publish metadata to %s:%s, %v", node.Id, node.Addr, err)
+			common.Errorf("failed to publish metadata to %s:%s, %v", node.Id, node.Addr, err)
 			return nil
 		}
 		if resp.ErrorType == pb.ErrorType_LeaderIdNotMatch {
-			b.Log.Errorf("failed to publish metadata to %s:%s, %v", node.Id, node.Addr, err)
+			common.Errorf("failed to publish metadata to %s:%s, %v", node.Id, node.Addr, err)
 			return nil
 		}
 		if resp.ErrorType == pb.ErrorType_TermNotMatch {
-			b.Log.Errorf("failed to publish metadata to %s:%s, %v", node.Id, node.Addr, err)
+			common.Errorf("failed to publish metadata to %s:%s, %v", node.Id, node.Addr, err)
 			return nil
 		}
 		if err != nil {
-			b.Log.Errorf("failed to publish metadata to %s:%s, will try agian, %v", node.Id, node.Addr, err)
+			common.Errorf("failed to publish metadata to %s:%s, will try agian, %v", node.Id, node.Addr, err)
 			time.Sleep(200 * time.Millisecond)
 			return err
 		}
-		b.Log.Infof("publish metadata to %s:%s success", node.Id, node.Addr)
+		common.Infof("publish metadata to %s:%s success", node.Id, node.Addr)
 		return nil
 	})
 
 	if err != nil {
-		b.Log.Errorf("failed to publish metadata to %s:%s, %v", node.Id, node.Addr, err)
+		common.Errorf("failed to publish metadata to %s:%s, %v", node.Id, node.Addr, err)
 		return false
 	}
 	return true
@@ -247,7 +247,7 @@ func (b *BaseCluster) connectOtherCandidateNodes() {
 	if len(otherNodes) == 0 {
 		// this rarely happens because the list of servers in cluster mode
 		// has already been determined when the node starts
-		b.Log.Error("failed to get other candidate nodes")
+		common.Error("failed to get other candidate nodes")
 		b.Shutdown()
 		return
 	}
@@ -264,7 +264,7 @@ func (b *BaseCluster) connectOtherCandidateNodes() {
 		})
 	}
 	wg.Wait()
-	b.Log.Info("all the other candidate nodes are connected.")
+	common.Info("all the other candidate nodes are connected.")
 }
 
 func (b *BaseCluster) Shutdown() {
@@ -272,13 +272,13 @@ func (b *BaseCluster) Shutdown() {
 		future := b.Raft.Shutdown()
 		err := future.Error()
 		if err != nil {
-			b.Log.Errorf("raft shutdown failed: %v", err)
+			common.Errorf("raft shutdown failed: %v", err)
 		}
 	}
 
 	err := b.Manager.CloseAllConn()
 	if err != nil {
-		b.Log.Errorf("close all connections failed: %v", err)
+		common.Errorf("close all connections failed: %v", err)
 	}
 	close(b.ShutDownCh)
 	time.Sleep(time.Second)
@@ -308,7 +308,7 @@ func (b *BaseCluster) ConnectToNode(remoteNode config.NodeInfo) {
 		}
 		conn, err := grpc.Dial(remoteNode.Addr, grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
 		if err != nil {
-			b.Log.Errorf("failed to dial server: %s, retry time: %d. %v", remoteNode.Addr, retries, err)
+			common.Errorf("failed to dial server: %s, retry time: %d. %v", remoteNode.Addr, retries, err)
 			retries++
 			time.Sleep(time.Second)
 			continue
@@ -320,7 +320,7 @@ func (b *BaseCluster) ConnectToNode(remoteNode config.NodeInfo) {
 		conn.WaitForStateChange(ctx, connectivity.Connecting)
 
 		if conn.GetState() == connectivity.Ready {
-			b.Log.Infof("connected to node: %s, %s", remoteNode.Id, remoteNode.Addr)
+			common.Infof("connected to node: %s, %s", remoteNode.Id, remoteNode.Addr)
 
 			// record remote connection
 			clusterServiceClient := pb.NewClusterServiceClient(conn)
@@ -333,7 +333,7 @@ func (b *BaseCluster) ConnectToNode(remoteNode config.NodeInfo) {
 		time.Sleep(5 * time.Second)
 
 		if time.Now().Sub(printTime).Seconds() > 30 {
-			b.Log.Warnf("[heartbeat] waiting for %s:%s to be ready", remoteNode.Id, remoteNode.Addr)
+			common.Warnf("[heartbeat] waiting for %s:%s to be ready", remoteNode.Id, remoteNode.Addr)
 			printTime = time.Now()
 		}
 	}
@@ -372,21 +372,21 @@ func (b *BaseCluster) getRemoteNodeInfo(remoteNode config.NodeInfo) {
 		if err != nil {
 			connected := b.IsConnected(remoteNode.Id)
 			if !connected {
-				b.Log.Errorf("remote node [%s][%s] is disconnected.", remoteNode.Id, remoteNode.Addr)
+				common.Errorf("remote node [%s][%s] is disconnected.", remoteNode.Id, remoteNode.Addr)
 				b.ConnectToNode(remoteNode)
 				continue
 			}
-			b.Log.Errorf("failed to get node info from %s - %s, retry time: %d, . %v", remoteNode.Id, remoteNode.Addr, retries, err)
+			common.Errorf("failed to get node info from %s - %s, retry time: %d, . %v", remoteNode.Id, remoteNode.Addr, retries, err)
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
 
 		if remote.StartupMode == pb.StartupMode_StandAlone {
-			b.Log.Warnf("remote node [%s][%s] is in standalone mode, close the remote connection.", remoteNode.Id, remoteNode.Addr)
+			common.Warnf("remote node [%s][%s] is in standalone mode, close the remote connection.", remoteNode.Id, remoteNode.Addr)
 			b.RemoveNode(remote.NodeId)
 			err := b.CloseConn(remote.NodeId)
 			if err != nil {
-				b.Log.Errorf("failed to close the remote connection of node [%s][%s], %v", remoteNode.Id, remoteNode.Addr, err)
+				common.Errorf("failed to close the remote connection of node [%s][%s], %v", remoteNode.Id, remoteNode.Addr, err)
 			}
 			return
 		}
@@ -416,18 +416,18 @@ func (b *BaseCluster) ApplyClusterMetaData(err error, req *pb.PublishMetadataReq
 	var metaData MetaData
 	err = json.Unmarshal([]byte(req.MetaData), &metaData)
 	if err != nil {
-		b.Log.Errorf("[follower] cluster metadata reception failed, unmarshal metadata failed: %s, %v", req.MetaData, err)
+		common.Errorf("[follower] cluster metadata reception failed, unmarshal metadata failed: %s, %v", req.MetaData, err)
 		return errors.New("unmarshal metadata failed")
 	}
 
 	jsonBytes, _ := json.Marshal(metaData.ActualNodeMap)
-	b.Log.Debugf("meta data actual node map: %s", string(jsonBytes))
+	common.Debugf("meta data actual node map: %s", string(jsonBytes))
 
 	// update cluster node config
 	b.ClusterActualNodes = metaData.ActualNodeMap
 
 	jsonBytes, _ = json.Marshal(b.ClusterActualNodes)
-	b.Log.Debugf("update cluster actual nodes to: %s", string(jsonBytes))
+	common.Debugf("update cluster actual nodes to: %s", string(jsonBytes))
 
 	metaData.State = b.State.String()
 	metaData.NodeConfig = *b.NodeConfig
@@ -435,17 +435,17 @@ func (b *BaseCluster) ApplyClusterMetaData(err error, req *pb.PublishMetadataReq
 	b.MetaData = metaData
 	b.ClusterId = metaData.ClusterId
 
-	b.Log.Debugf("cluster id update to: %d", b.ClusterId)
+	common.Debugf("cluster id update to: %d", b.ClusterId)
 
 	err = common.PersistToJsonFileWithCheckSum(b.NodeConfig.DataDir+MetaDataFileName, metaData)
 	if err != nil {
-		b.Log.Errorf("[follower] persist meta data failed: %v", err)
+		common.Errorf("[follower] persist meta data failed: %v", err)
 		return errors.New("persist metadata failed")
 	}
-	b.Log.Infof("[follower] persist cluster meta data success.")
+	common.Infof("[follower] persist cluster meta data success.")
 
 	b.SlotManager.InitSlotsAndReplicas(b.SelfNode.Id, metaData.Shards, metaData.Replicas, *b.Config)
 
-	b.Log.Infof("[follower] init slots and replicas success.")
+	common.Infof("[follower] init slots and replicas success.")
 	return nil
 }

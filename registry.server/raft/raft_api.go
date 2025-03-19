@@ -2,8 +2,8 @@ package raft
 
 import (
 	"context"
+	common "github.com/linkypi/hiraeth.registry/common"
 	core "github.com/linkypi/hiraeth.registry/server/cluster/network"
-	"github.com/linkypi/hiraeth.registry/server/log"
 	"io"
 	"sync"
 	"time"
@@ -31,7 +31,7 @@ func (r raftAPI) LocalAddr() raft.ServerAddress {
 func (r raftAPI) getPeer(id raft.ServerID, target raft.ServerAddress) (pb.RaftTransportClient, error) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Log.Errorf("raft failed to get peer connection, id: %s, %v", id, r)
+			common.Errorf("raft failed to get peer connection, id: %s, %v", id, r)
 		}
 	}()
 	client, err := r.net.GetRaftClient(string(id))

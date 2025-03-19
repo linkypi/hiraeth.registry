@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/fatih/set"
 	"github.com/hashicorp/raft"
-	util "github.com/linkypi/hiraeth.registry/common"
+	common "github.com/linkypi/hiraeth.registry/common"
 	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/config"
 	"github.com/linkypi/hiraeth.registry/server/slot"
@@ -42,23 +42,23 @@ func (l *Leader) buildCluster(nodes []config.NodeInfo) bool {
 	// if some nodes are down or unable to connect, the cluster cannot be created
 	ret := l.notifyAllNodesLeaderShipTransferStatus(nodes, pb.TransferStatus_Transitioning)
 	if !ret {
-		l.Log.Errorf("[leader] failed to notify follower transfer leadership to [transitioning], some followers are not ready")
+		common.Errorf("[leader] failed to notify follower transfer leadership to [transitioning], some followers are not ready")
 		return false
 	}
-	l.Log.Debugf("[leader] notify all followers transfer leadership to [transitioning] success.")
+	common.Debugf("[leader] notify all followers transfer leadership to [transitioning] success.")
 
-	l.Log.Debugf("[leader] verifing all the followers...")
+	common.Debugf("[leader] verifing all the followers...")
 	ackNum, actualClusterNodes, total := l.verifyAllFollowers()
 	addresses := l.GetAddresses(actualClusterNodes)
 	// Check whether the number of quorums in the healthy nodes of the cluster has been met
 	jsonStr, _ := json.Marshal(addresses)
 	if ackNum < l.Config.ClusterQuorumCount {
-		l.Log.Errorf("[leader] failed to create cluster, healthy nodes quorum not met, "+
+		common.Errorf("[leader] failed to create cluster, healthy nodes quorum not met, "+
 			"ackNum: %d, ack nodes: %s, total required: %d", ackNum, jsonStr, total)
 		return false
 	}
 
-	l.Log.Debugf("[leader] the followers verified: %s", jsonStr)
+	common.Debugf("[leader] the followers verified: %s", jsonStr)
 	// We have to remove the invalid nodes, because raft has already joined all nodes in the configuration to the cluster at startup
 	// raft constantly tries to automatically connect all the nodes and then join them to the cluster
 	// however, in some cases, it may not be possible to connect to some nodes, or some nodes may become obsolete
@@ -72,12 +72,12 @@ func (l *Leader) buildCluster(nodes []config.NodeInfo) bool {
 
 	success := l.notifyAllNodesLeaderShipTransferStatus(actualClusterNodes, pb.TransferStatus_Completed)
 	if !success {
-		l.Log.Errorf("[leader] failed to notify follower transfer leadership to [completed], some followers are not ready")
+		common.Errorf("[leader] failed to notify follower transfer leadership to [completed], some followers are not ready")
 		return false
 	}
 
 	l.SetState(Active)
-	l.Log.Infof("[leader] the cluster is healthy, start receiving client requests")
+	common.Infof("[leader] the cluster is healthy, start receiving client requests")
 	return true
 }
 
@@ -96,10 +96,10 @@ func (l *Leader) removeInvalidServerInCluster(actualClusterNodes []config.NodeIn
 		serverId := fmt.Sprintf("%s", s)
 		future := l.Raft.RemoveServer(raft.ServerID(serverId), 0, time.Millisecond*500)
 		if err := future.Error(); err != nil {
-			l.Log.Debugf("[cluster] failed to remove server %s from raft cluster, err: %v", s, err)
+			common.Debugf("[cluster] failed to remove server %s from raft cluster, err: %v", s, err)
 			continue
 		}
-		l.Log.Warnf("[cluster] removed invalid node %s in raft", s)
+		common.Warnf("[cluster] removed invalid node %s in raft", s)
 	}
 
 	for _, an := range l.ClusterActualNodes {
@@ -129,7 +129,7 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 	if err != nil {
 		return err
 	}
-	l.Log.Debugf("cluster actual nodes before build meta data: %s", string(marshal))
+	common.Debugf("cluster actual nodes before build meta data: %s", string(marshal))
 
 	actualNodesMap := l.ClusterActualNodes
 	actualNodes := l.MapToList(actualNodesMap)
@@ -157,11 +157,11 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 	if err != nil {
 		return err
 	}
-	l.Log.Debugf("meta data: %s", string(marshal))
+	common.Debugf("meta data: %s", string(marshal))
 
-	err = util.PersistToJsonFileWithCheckSum(l.NodeConfig.DataDir+MetaDataFileName, metaData)
+	err = common.PersistToJsonFileWithCheckSum(l.NodeConfig.DataDir+MetaDataFileName, metaData)
 	if err != nil {
-		l.Log.Errorf("persist meta data failed: %v", err)
+		common.Errorf("persist meta data failed: %v", err)
 		return err
 	}
 
@@ -177,7 +177,7 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 func (l *Leader) AddNewNode(remoteNode *config.NodeInfo) error {
 
 	if l.Raft == nil {
-		l.Log.Errorf("[cluster] raft is nil, can not add new node, node id: %s, node addr: %s", remoteNode.Id, remoteNode.Addr)
+		common.Errorf("[cluster] raft is nil, can not add new node, node id: %s, node addr: %s", remoteNode.Id, remoteNode.Addr)
 		return errors.New("raft is nil, can not add new node")
 	}
 	// Check whether the connection of the new node exists, and if not, establish the connection first
@@ -185,7 +185,7 @@ func (l *Leader) AddNewNode(remoteNode *config.NodeInfo) error {
 		l.ConnectToNode(*remoteNode)
 	}
 	if l.State != Active {
-		l.Log.Errorf("[cluster] cluster state is not active: %s, can not add new node, id: %s, addr: %s",
+		common.Errorf("[cluster] cluster state is not active: %s, can not add new node, id: %s, addr: %s",
 			l.State.String(), remoteNode.Id, remoteNode.Addr)
 		return errors.New("cluster state is not active")
 	}
@@ -213,11 +213,11 @@ func (l *Leader) AddNewNode(remoteNode *config.NodeInfo) error {
 	err := indexFur.Error()
 	if err != nil {
 		// add later , configuration changed since 30 (latest is 1)
-		l.Log.Errorf("[cluster] add new node to cluster failed, node id: %s, addr: %s. %v", remoteNode.Id, remoteNode.Addr, err)
+		common.Errorf("[cluster] add new node to cluster failed, node id: %s, addr: %s. %v", remoteNode.Id, remoteNode.Addr, err)
 		return err
 	}
 
-	l.Log.Infof("[cluster] add new node to cluster success, node id: %s, addr: %s", remoteNode.Id, remoteNode.Addr)
+	common.Infof("[cluster] add new node to cluster success, node id: %s, addr: %s", remoteNode.Id, remoteNode.Addr)
 	return nil
 
 }

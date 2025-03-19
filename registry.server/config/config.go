@@ -2,7 +2,7 @@ package config
 
 import (
 	"bufio"
-	"github.com/sirupsen/logrus"
+	"github.com/linkypi/hiraeth.registry/common"
 	"os"
 	"reflect"
 	"strconv"
@@ -10,7 +10,6 @@ import (
 )
 
 var properties = make([]property, 0, 16)
-var log *logrus.Logger
 
 // loadConfig reads a .conf file and parses its contents into a map
 func loadConfig(filePath string) (map[string]string, error) {
@@ -43,11 +42,10 @@ func loadConfig(filePath string) (map[string]string, error) {
 	return props, nil
 }
 
-func ParseConfig(filePath string, logger *logrus.Logger) Config {
-	log = logger
+func ParseConfig(filePath string) Config {
 	configMap, err := loadConfig(filePath)
 	if err != nil {
-		log.Error("load config file failed", err)
+		common.Error("load config file failed", err)
 		os.Exit(1)
 	}
 
@@ -55,14 +53,14 @@ func ParseConfig(filePath string, logger *logrus.Logger) Config {
 	for _, prop := range properties {
 		val, exist := configMap[prop.key]
 		if prop.require && (!exist || val == "") {
-			log.Error("property " + prop.key + " cannot be empty.")
+			common.Error("property " + prop.key + " cannot be empty.")
 			os.Exit(1)
 		}
 		setInternalConfigProperty(&interConfig, prop, val)
 	}
 
 	if interConfig.StartupMode == Cluster && (len(interConfig.ClusterServers) < 2) {
-		log.Error("the cluster address is not configured, it must be configured when starting with cluster mode")
+		common.Error("the cluster address is not configured, it must be configured when starting with cluster mode")
 		os.Exit(1)
 	}
 
@@ -122,7 +120,7 @@ func buildClusterConfig(selfNode *NodeInfo, interConfig internalConfig) ClusterC
 		ip := parts[1]
 		port, err := strconv.Atoi(parts[2])
 		if err != nil {
-			log.Error("parse candidate server port failed: "+server, err)
+			common.Error("parse candidate server port failed: "+server, err)
 			os.Exit(1)
 		}
 		addr := parts[1] + ":" + parts[2]
@@ -156,12 +154,13 @@ func SetConfigProperty(config *Config, prop property, val string) {
 
 func setConfigProperty(elems reflect.Value, prop property, val string) {
 	field := elems.FieldByName(prop.propName)
-	defer func() {
-		if r := recover(); r != nil {
-			log.Errorf("config value of property [%s] is invalid: %s, %v", prop.propName, val, r)
-			os.Exit(1)
-		}
-	}()
+	defer common.PrintStackTrace()
+	//defer func() {
+	//	if r := recover(); r != nil {
+	//		common.Errorf("config value of property [%s] is invalid: %s, %v", prop.propName, val, r)
+	//		os.Exit(1)
+	//	}
+	//}()
 	if field.IsValid() && field.CanSet() {
 		if field.Kind() == reflect.Array && prop.parseHandler != nil {
 			newValues := prop.parseHandler(val, prop.key, prop.Options)
@@ -172,7 +171,7 @@ func setConfigProperty(elems reflect.Value, prop property, val string) {
 		switch prop.dataType {
 		case "string":
 			if val == "" {
-				log.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
+				common.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
 				field.SetString(prop.defaultVal.(string))
 				return
 			}
@@ -186,7 +185,7 @@ func setConfigProperty(elems reflect.Value, prop property, val string) {
 		case "int":
 			strVal := val
 			if val == "" {
-				log.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
+				common.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
 				ret := reflect.ValueOf(prop.defaultVal)
 				field.Set(ret.Convert(field.Type()))
 				return
@@ -196,7 +195,7 @@ func setConfigProperty(elems reflect.Value, prop property, val string) {
 			}
 			intVal, err := strconv.ParseInt(strVal, 10, 64)
 			if err != nil {
-				log.Errorf("property %s default value is invalid: %s", prop.key, strVal)
+				common.Errorf("property %s default value is invalid: %s", prop.key, strVal)
 				os.Exit(1)
 			}
 			ret := reflect.ValueOf(intVal)
@@ -205,7 +204,7 @@ func setConfigProperty(elems reflect.Value, prop property, val string) {
 		case "bool":
 			strVal := val
 			if val == "" {
-				log.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
+				common.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
 				field.SetBool(prop.defaultVal.(bool))
 				return
 			}
@@ -216,13 +215,13 @@ func setConfigProperty(elems reflect.Value, prop property, val string) {
 			}
 			bVal, err := strconv.ParseBool(strVal)
 			if err != nil {
-				log.Errorf("property %s default value is invalid: %s", prop.key, strVal)
+				common.Errorf("property %s default value is invalid: %s", prop.key, strVal)
 				os.Exit(1)
 			}
 			field.SetBool(bVal)
 		default:
 			if val == "" {
-				log.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
+				common.Debugf("property not specified %s, use default value instead: %s", prop.propName, prop.defaultVal)
 				valueOf := reflect.ValueOf(prop.defaultVal)
 				field.Set(valueOf.Convert(field.Type()))
 				return
@@ -244,7 +243,7 @@ func setConfigProperty(elems reflect.Value, prop property, val string) {
 //		if dataType == "int" {
 //			intVal, err := strconv.Atoi(val.(string))
 //			if err != nil {
-//				log.Errorf("property %s default value is invalid: %s", prop.key, val)
+//				common.Errorf("property %s default value is invalid: %s", prop.key, val)
 //				os.Exit(1)
 //			}
 //			filed.SetInt(intVal)

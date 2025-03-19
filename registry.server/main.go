@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
+	common "github.com/linkypi/hiraeth.registry/common"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	"github.com/linkypi/hiraeth.registry/server/log"
 )
 
 var (
@@ -21,8 +21,8 @@ var (
 func main() {
 
 	flag.Parse()
-	log.Log.Infof("config file path: %s", *configPath)
-	conf := config.ParseConfig(*configPath, log.Log)
+	common.Infof("config file path: %s", *configPath)
+	conf := config.ParseConfig(*configPath)
 
 	// if there are specified parameters on the command line, the parameter is used preferentially
 	// and the relevant parameters in the registry.conf file are ignored
@@ -34,7 +34,7 @@ func main() {
 	}
 	conf.JoinCluster = *join
 
-	log.InitLogger(conf.NodeConfig.LogDir, conf.LogLevel)
+	common.InitLogger(conf.NodeConfig.LogDir, conf.LogLevel)
 
 	node := NewNode(conf)
 	node.Start(conf)

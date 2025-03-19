@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-var Log = logrus.New()
+var log = logrus.New()
 
 type Formatter struct {
 }
@@ -23,6 +23,32 @@ const (
 	gray   = 37
 )
 
+// 包级别日志函数
+var (
+	Trace  = log.Trace
+	Tracef = log.Tracef
+	Debug  = log.Debug
+	Debugf = log.Debugf
+	Info   = log.Info
+	Infof  = log.Infof
+	Warn   = log.Warn
+	Warnf  = log.Warnf
+	Error  = log.Error
+	Errorf = log.Errorf
+	Fatal  = log.Fatal
+	Fatalf = log.Fatalf
+	Panic  = log.Panic
+	Panicf = log.Panicf
+)
+
+func GetLogger() *logrus.Logger {
+	return log
+}
+
+// WithFields 暴露WithFields方法
+func WithFields(fields logrus.Fields) *logrus.Entry {
+	return log.WithFields(fields)
+}
 func (t Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 	// display colors according to different levels
 	var levelColor int
@@ -68,9 +94,23 @@ func InitLogger(logDir string, logLevel logrus.Level) {
 		_ = os.MkdirAll(logDir, 0755)
 	}
 
-	Log.SetReportCaller(true)
-	Log.SetLevel(logLevel)
-	Log.SetFormatter(&Formatter{})
+	log.SetReportCaller(true)
+	log.SetLevel(logLevel)
+	log.SetFormatter(&Formatter{})
+
+	// 配置日志分割
+	infoWriter := createRotateWriter(logDir, "info")
+	errorWriter := createRotateWriter(logDir, "error")
+
+	// 设置输出
+	mw := io.MultiWriter(
+		os.Stdout,
+		infoWriter,
+	)
+	log.SetOutput(mw)
+
+	// 添加错误级别hook
+	log.AddHook(&ErrorHook{Writer: errorWriter})
 
 	infoLog, err := rotatelogs.New(logDir+"/%Y%m%d.info.log",
 		rotatelogs.WithLinkName(logDir+"/info.log"),
@@ -91,7 +131,43 @@ func InitLogger(logDir string, logLevel logrus.Level) {
 	//	panic(err)
 	//}
 
-	Log.SetOutput(io.MultiWriter(os.Stdout, infoLog))
+	log.SetOutput(io.MultiWriter(os.Stdout, infoLog))
 	//log.SetOutput(io.MultiWriter(os.Stderr, errorLog))
-	Log.Info("log init success")
+	log.Info("log init success")
+}
+
+// 创建分割日志writer
+func createRotateWriter(logDir string, level string) io.Writer {
+	writer, err := rotatelogs.New(
+		path.Join(logDir, fmt.Sprintf("%s.%%Y%%m%%d.log", level)),
+		rotatelogs.WithLinkName(path.Join(logDir, level+".log")),
+		rotatelogs.WithMaxAge(7*24*time.Hour),
+		rotatelogs.WithRotationTime(24*time.Hour),
+	)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create %s log writer: %v", level, err))
+	}
+	return writer
+}
+
+// ErrorHook 错误级别hook
+type ErrorHook struct {
+	Writer io.Writer
+}
+
+func (hook *ErrorHook) Levels() []logrus.Level {
+	return []logrus.Level{
+		logrus.PanicLevel,
+		logrus.FatalLevel,
+		logrus.ErrorLevel,
+	}
+}
+
+func (hook *ErrorHook) Fire(entry *logrus.Entry) error {
+	line, err := entry.Logger.Formatter.Format(entry)
+	if err != nil {
+		return err
+	}
+	_, err = hook.Writer.Write(line)
+	return err
 }

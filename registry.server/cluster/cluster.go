@@ -3,10 +3,10 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"github.com/linkypi/hiraeth.registry/common"
 	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/cluster/network"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	"github.com/linkypi/hiraeth.registry/server/log"
 	"github.com/linkypi/hiraeth.registry/server/slot"
 	"strconv"
 	"sync"
@@ -28,7 +28,6 @@ func NewCluster(conf *config.Config, selfNode *config.NodeInfo, slotManager *slo
 
 	cluster := Cluster{
 		BaseCluster: &BaseCluster{
-			Log:         log.Log,
 			StartUpMode: conf.StartupMode,
 			joinCluster: conf.JoinCluster,
 			Config:      &conf.ClusterConfig,
@@ -69,7 +68,7 @@ func (c *Cluster) Start(dataDir string) {
 
 	go c.CheckConnClosed(c.ShutDownCh, func(id string) {
 		nodeInfo := c.ClusterActualNodes[id]
-		c.Log.Infof("node %s is disconnected, re-establish the connection: %s", nodeInfo.Id, nodeInfo.Addr)
+		common.Infof("node %s is disconnected, re-establish the connection: %s", nodeInfo.Id, nodeInfo.Addr)
 		c.ConnectToNode(nodeInfo)
 	})
 
@@ -84,7 +83,7 @@ func (c *Cluster) handleClusterDowntime() {
 		return
 	}
 
-	c.Log.Errorf("cluster is down or the network partitioned")
+	common.Errorf("cluster is down or the network partitioned")
 	c.SetState(Down)
 }
 
@@ -117,7 +116,7 @@ func (c *Cluster) detectClusterState(detectDownTimes *int) {
 
 	seconds := time.Now().Sub(c.lastStateTime).Seconds()
 	if seconds > 30 {
-		c.Log.Debugf(" node state [%s]", state)
+		common.Debugf(" node state [%s]", state)
 		c.lastStateTime = time.Now()
 	}
 
@@ -129,7 +128,7 @@ func (c *Cluster) detectClusterState(detectDownTimes *int) {
 		// has exceeded one election cycles, detect three times. If the conditions are met, the cluster is down
 		duration := time.Now().Sub(c.SelfNode.LastStateUpdateTime).Milliseconds()
 		if c.SelfNode.State == config.Candidate && duration > int64(c.Config.RaftElectionTimeout) {
-			c.Log.Debugf("[Candidate] state duration [%d], detectDownTimes [%d]", duration, *detectDownTimes)
+			common.Debugf("[Candidate] state duration [%d], detectDownTimes [%d]", duration, *detectDownTimes)
 			*detectDownTimes++
 			if *detectDownTimes > 3 {
 				*detectDownTimes = 0
@@ -156,10 +155,10 @@ func (c *Cluster) transferLeaderShip() {
 		// If the current node is the leader node before, the cluster is down or the
 		// network is partitioned, and only the current node remains in the cluster
 		if leaderId == "" {
-			c.Log.Errorf("cluster is down or the network is partitioned, and only the current node remains in the cluster")
+			common.Errorf("cluster is down or the network is partitioned, and only the current node remains in the cluster")
 			go c.handleClusterDowntime()
 		}
-		c.Log.Errorf("failed to transfer leadership: %s", future.Error())
+		common.Errorf("failed to transfer leadership: %s", future.Error())
 		return
 	}
 
@@ -168,7 +167,7 @@ func (c *Cluster) transferLeaderShip() {
 	c.SetState(Transitioning)
 
 	jsonStr, _ := json.Marshal(stats)
-	c.Log.Debugf("[leader] transfer leadership to %s, raft stats : %s", leaderId, jsonStr)
+	common.Debugf("[leader] transfer leadership to %s, raft stats : %s", leaderId, jsonStr)
 
 	c.UpdateLeader(uint64(term), string(leaderId), string(leaderAddr))
 
@@ -190,7 +189,7 @@ func (c *Cluster) joinToCluster() {
 		}
 		_, err := (*rpcClient).JoinCluster(context.Background(), &request)
 		if err != nil {
-			c.Log.Errorf("failed to join cluster from remote node, id: %s, addr: %s, %s", node.Id, node.Addr, err.Error())
+			common.Errorf("failed to join cluster from remote node, id: %s, addr: %s, %s", node.Id, node.Addr, err.Error())
 		}
 	}
 }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"github.com/linkypi/hiraeth.registry/common"
 	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/cluster"
 	"github.com/linkypi/hiraeth.registry/server/slot"
@@ -34,7 +35,7 @@ func (r *RegisterHandler) Handle(req any, bucket *slot.Bucket, ctx context.Conte
 
 	err := r.serviceImpl.DoRegister(bucket, request.ServiceName, ip, int(port))
 	if err != nil {
-		r.log.Errorf("failed to register service: %v", err)
+		common.Errorf("failed to register service: %v", err)
 		return nil, err
 	}
 	return &pb.RegisterResponse{Success: true}, nil

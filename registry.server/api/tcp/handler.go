@@ -32,12 +32,12 @@ func (s *Server) handleRequest(startCh chan struct{}) {
 }
 
 func (s *Server) handle(wrapper RequestWrapper) {
-	s.log.Debugf("received request, msg type: %s", wrapper.MsgType.String())
+	common.Debugf("received request, msg type: %s", wrapper.MsgType.String())
 	if wrapper.MsgType == common.RequestMsg {
 		var req common.Request
 		err := common.Decode(wrapper.Data, &req)
 		if err != nil {
-			s.log.Errorf("decode request error: %v", err)
+			common.Errorf("decode request error: %v", err)
 			return
 		}
 
@@ -51,38 +51,38 @@ func (s *Server) handle(wrapper RequestWrapper) {
 		var res common.Response
 		err := common.Decode(wrapper.Data, &res)
 		if err != nil {
-			s.log.Errorf("decode response error: %v", err)
+			common.Errorf("decode response error: %v", err)
 			return
 		}
-		s.log.Debugf("received response, req id: %d, req type: %s", res.RequestId, res.RequestType.String())
+		common.Debugf("received response, req id: %d, req type: %s", res.RequestId, res.RequestType.String())
 		_ = s.workerPool.Submit(func() {
 			s.handleResponse(res, wrapper.Conn)
 		})
 		return
 	}
-	s.log.Errorf("unknown message type: %d", wrapper.MsgType)
+	common.Errorf("unknown message type: %d", wrapper.MsgType)
 }
 
 func (s *Server) handleResponse(res common.Response, c gnet.Conn) {
 
-	s.log.Debugf("reply client response: %s, bytes: %d", res.RequestType.String(), 0)
+	common.Debugf("reply client response: %s, bytes: %d", res.RequestType.String(), 0)
 }
 
 func (s *Server) doHandle(request common.Request, conn gnet.Conn) {
 
-	s.log.Debugf("received request, req type: %s, req id: %d", request.RequestType.String(), request.RequestId)
+	common.Debugf("received request, req type: %s, req id: %d", request.RequestType.String(), request.RequestId)
 	res, forwarded, err := s.handlerFactory.Handle(request, conn)
 	if err != nil {
-		s.log.Warnf("encode response error: %v", err)
+		common.Warnf("encode response error: %v", err)
 		return
 	}
 	jsonStr, _ := json.Marshal(request)
 	bytes, err := res.ToBytes()
 	err = conn.AsyncWrite(bytes)
 	if err != nil {
-		s.log.Errorf("async send message error, msg: %s, %v", jsonStr, err)
+		common.Errorf("async send message error, msg: %s, %v", jsonStr, err)
 	}
-	s.log.Debugf("reply client request: %s, id: %d, bytes: %d", request.RequestType.String(), request.RequestId, len(bytes))
+	common.Debugf("reply client request: %s, id: %d, bytes: %d", request.RequestType.String(), request.RequestId, len(bytes))
 
 	// Check whether the processing results need to be replicated to replicas
 	// After the primary shard data is updated, it needs to be synchronized asynchronously to its replica shard

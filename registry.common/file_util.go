@@ -1,11 +1,9 @@
 package common
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"google.golang.org/appengine/log"
 	"hash/crc32"
 	"io"
 	"os"
@@ -19,7 +17,7 @@ func calcFileChecksum(filePath string) (uint32, error) {
 	defer func(f *os.File) {
 		err := f.Close()
 		if err != nil {
-			log.Errorf(context.Background(), "Error closing file: %v", err)
+			log.Errorf("Error closing file: %v", err)
 		}
 	}(f)
 
@@ -40,7 +38,7 @@ func CreateFile(path string) error {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Errorf(context.Background(), "failed to close file %v", path)
+			log.Errorf("failed to close file %v", path)
 		}
 	}(file)
 	return nil
@@ -55,7 +53,7 @@ func saveJsonFile(filePath string, obj any) error {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Errorf(context.Background(), "failed to close file %s, %v", filePath, err)
+			log.Errorf("failed to close file %s, %v", filePath, err)
 		}
 	}(file)
 	_, err = file.Write(bytes)
@@ -74,7 +72,7 @@ func PersistToJsonFileWithCheckSum(filePath string, content any) error {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Errorf(context.Background(), "failed to close file %s, %v", filePath, err)
+			log.Errorf("failed to close file %s, %v", filePath, err)
 		}
 	}(file)
 
@@ -113,7 +111,7 @@ func ReadJsonFileWithCheckSum(filePath string) (string, error) {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Errorf(context.Background(), "failed to close file %s, %v", filePath, err)
+			log.Errorf("failed to close file %s, %v", filePath, err)
 		}
 	}(file)
 

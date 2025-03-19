@@ -10,7 +10,6 @@ import (
 	"github.com/linkypi/hiraeth.registry/server/cluster/network"
 	"github.com/linkypi/hiraeth.registry/server/config"
 	"github.com/linkypi/hiraeth.registry/server/slot"
-	"github.com/sirupsen/logrus"
 	"strconv"
 	"sync"
 	"time"
@@ -19,7 +18,6 @@ import (
 type BaseCluster struct {
 	*network.Manager
 	SlotManager *slot.Manager
-	Log         *logrus.Logger
 
 	State       State
 	StateMtx    sync.Mutex
@@ -82,7 +80,7 @@ func (b *BaseCluster) SetState(state State) {
 	defer b.StateMtx.Unlock()
 	b.State = state
 	b.MetaData.State = state.String()
-	b.Log.Debugf("cluster state changed to %s", state)
+	common.Debugf("cluster state changed to %s", state)
 }
 
 func (b *BaseCluster) setNet(net *network.Manager) {
@@ -194,7 +192,7 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 	if remoteNode.Id == selfNode.Id {
 		msg := fmt.Sprintf("[cluster] the remote node id [%s][%s] conflicts with the current node id [%s][%s]",
 			remoteNode.Id, remoteNode.Addr, selfNode.Id, selfNode.Addr)
-		//b.Log.Warnf(msg)
+		//common.Warnf(msg)
 		if throwEx {
 			panic(msg)
 		}
@@ -206,7 +204,7 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 		// it is possible that a node is missing from the cluster address
 		// configuration in the node, or it may be a new node
 		msg := fmt.Sprintf("[cluster] remote node [%s][%s] not found int cluster servers, add it to cluster.", remoteNode.Id, remoteNode.Addr)
-		b.Log.Info(msg)
+		common.Info(msg)
 		node = remoteNode
 		b.ClusterExpectedNodes[remoteNode.Id] = node
 		b.ClusterActualNodes[remoteNode.Id] = node
@@ -217,7 +215,7 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 		if node.Addr != remoteNode.Addr {
 			msg := fmt.Sprintf("[cluster] update remote node info failed, node id exist, but addr not match: %s, %s, %s",
 				remoteNode.Id, node.Addr, remoteNode.Addr)
-			b.Log.Error(msg)
+			common.Error(msg)
 			if throwEx {
 				panic(msg)
 			}
@@ -229,7 +227,7 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 		b.ClusterActualNodes[node.Id] = node
 	}
 
-	b.Log.Infof("[cluster] update remote node info: %s, %s", remoteNode.Id, remoteNode.Addr)
+	common.Infof("[cluster] update remote node info: %s, %s", remoteNode.Id, remoteNode.Addr)
 	return nil
 }
 
@@ -256,7 +254,7 @@ func (b *BaseCluster) ForwardRequest(nodeId string, requestType pb.RequestType, 
 
 	defer func() {
 		if err := recover(); err != nil {
-			b.Log.Errorf("[cluster] forward request failed, %s", err)
+			common.Errorf("[cluster] forward request failed, %s", err)
 		}
 	}()
 	cliRequest := pb.ForwardCliRequest{
@@ -270,7 +268,7 @@ func (b *BaseCluster) ForwardRequest(nodeId string, requestType pb.RequestType, 
 	interRpcClient := b.GetInterRpcClient(nodeId)
 	response, err := (*interRpcClient).ForwardClientRequest(context.Background(), &cliRequest)
 	if err != nil {
-		b.Log.Errorf("failed to forward %s request, %v", requestType.String(), err)
+		common.Errorf("failed to forward %s request, %v", requestType.String(), err)
 		return nil, err
 	}
 
@@ -278,26 +276,26 @@ func (b *BaseCluster) ForwardRequest(nodeId string, requestType pb.RequestType, 
 		return response, nil
 	}
 	if response.ErrorType == pb.ErrorType_ClusterStateNotMatch {
-		b.Log.Errorf("failed to forward %s request, cluster state not match: %v", requestType.String(), err)
+		common.Errorf("failed to forward %s request, cluster state not match: %v", requestType.String(), err)
 		return nil, errors.New("cluster state not match")
 	}
 	if response.ErrorType == pb.ErrorType_ClusterIdNotMatch {
-		b.Log.Errorf("failed to forward %s request, cluster id not match: %v", requestType.String(), err)
+		common.Errorf("failed to forward %s request, cluster id not match: %v", requestType.String(), err)
 		return nil, errors.New("cluster id not match")
 	}
 	if response.ErrorType == pb.ErrorType_LeaderIdNotMatch {
-		b.Log.Errorf("failed to forward %s request, leader id not match: %v", requestType.String(), err)
+		common.Errorf("failed to forward %s request, leader id not match: %v", requestType.String(), err)
 		return nil, errors.New("leader id not match")
 	}
 	if response.ErrorType == pb.ErrorType_TermNotMatch {
-		b.Log.Errorf("failed to forward %s request, term not match: %v", requestType.String(), err)
+		common.Errorf("failed to forward %s request, term not match: %v", requestType.String(), err)
 		return nil, errors.New("term not match")
 	}
 	if response.ErrorType == pb.ErrorType_MetaDataChanged {
-		b.Log.Errorf("failed to forward %s request, meta data changed: %v", requestType.String(), err)
+		common.Errorf("failed to forward %s request, meta data changed: %v", requestType.String(), err)
 		return nil, errors.New("meta data changed")
 	}
-	b.Log.Errorf("failed to forward %s request, unknown error type: %v", requestType.String(), response.ErrorType)
+	common.Errorf("failed to forward %s request, unknown error type: %v", requestType.String(), response.ErrorType)
 	return nil, errors.New("unknown error type: " + response.ErrorType.String())
 }
 
@@ -305,17 +303,17 @@ func (b *BaseCluster) CheckNodeRouteForServiceName(target string) pb.ErrorType {
 	// Double-check that the current node is responsible for storing the service,
 	// and it's likely that the cluster has been readjusted
 	bucketIndex := common.GetBucketIndex(target)
-	b.Log.Debugf("bucket index %d", bucketIndex)
+	common.Debugf("bucket index %d", bucketIndex)
 	nodeId, err := b.GetNodeIdByIndex(bucketIndex)
 
 	if err != nil {
-		b.Log.Errorf("target node id not found by index [%d] in current node [%s], %v", bucketIndex, nodeId, err.Error())
+		common.Errorf("target node id not found by index [%d] in current node [%s], %v", bucketIndex, nodeId, err.Error())
 		return pb.ErrorType_MetaDataChanged
 	}
 
 	// The cluster metadata has changed
 	if nodeId != b.SelfNode.Id {
-		b.Log.Errorf("cluster metadata has changed,"+
+		common.Errorf("cluster metadata has changed,"+
 			" current node id %s does not match to the route node %s", b.SelfNode.Id, nodeId)
 		return pb.ErrorType_MetaDataChanged
 	}
@@ -324,25 +322,25 @@ func (b *BaseCluster) CheckNodeRouteForServiceName(target string) pb.ErrorType {
 
 func (b *BaseCluster) CheckClusterInfo(clusterId uint64, leaderId string, term uint64) pb.ErrorType {
 	if b.State != Active {
-		b.Log.Errorf("cluster %d is not active", clusterId)
+		common.Errorf("cluster %d is not active", clusterId)
 		return pb.ErrorType_ClusterStateNotMatch
 	}
 
 	if b.ClusterId != clusterId {
-		b.Log.Errorf("cluster id not match, current cluster id: %d, "+
+		common.Errorf("cluster id not match, current cluster id: %d, "+
 			"remote cluster id: %d", b.ClusterId, clusterId)
 		return pb.ErrorType_ClusterIdNotMatch
 	}
 
 	// It rarely happens, and as long as the ClusterId is the same, then the leaderId and term must be the same
 	if b.Leader.Id != leaderId {
-		b.Log.Errorf("the cluster id match, but the leader id don't, "+
+		common.Errorf("the cluster id match, but the leader id don't, "+
 			"current leader id: %s, remote leader id: %s", b.Leader.Id, leaderId)
 		return pb.ErrorType_LeaderIdNotMatch
 	}
 
 	if b.Leader.Term != term {
-		b.Log.Errorf("the cluster id match, but the term don't, current term: %d,"+
+		common.Errorf("the cluster id match, but the term don't, current term: %d,"+
 			" remote term: %d", b.Leader.Term, term)
 		return pb.ErrorType_TermNotMatch
 	}

@@ -2,17 +2,14 @@ package slot
 
 import (
 	"encoding/json"
-	"github.com/linkypi/hiraeth.registry/common"
+	common "github.com/linkypi/hiraeth.registry/common"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	"github.com/linkypi/hiraeth.registry/server/log"
-	"github.com/sirupsen/logrus"
 	"math/rand"
 )
 
 type Manager struct {
 	buckets []*Bucket
 
-	log              *logrus.Logger
 	numberOfReplicas int
 	selfId           string
 	dataDir          string
@@ -21,7 +18,6 @@ type Manager struct {
 
 func NewManager(selfId string, dataDir string, numberOfReplicas int, shutdownCh chan struct{}) *Manager {
 	return &Manager{
-		log:              log.Log,
 		buckets:          make([]*Bucket, common.SlotsCount),
 		numberOfReplicas: numberOfReplicas,
 		selfId:           selfId,
@@ -34,7 +30,7 @@ func (m *Manager) InitSlotsForStandAlone(nodeId string, clusterConfig config.Clu
 
 	m.buckets = make([]*Bucket, common.SlotsCount)
 	for i := 0; i < common.SlotsCount; i++ {
-		b := newBucket(i, nodeId, true, clusterConfig, shutdownCh, m.log)
+		b := newBucket(i, nodeId, true, clusterConfig, shutdownCh)
 		m.buckets = append(m.buckets, b)
 	}
 }
@@ -47,10 +43,10 @@ func (m *Manager) AllocateSlots(leaderId string, followerIds []string, clusterCo
 
 	jsonBytes, _ := json.Marshal(shards)
 	replicaBytes, _ := json.Marshal(replicas)
-	m.log.Debugf("allocated shards: %s, replicas: %s", string(jsonBytes), string(replicaBytes))
+	common.Debugf("allocated shards: %s, replicas: %s", string(jsonBytes), string(replicaBytes))
 
 	m.InitSlotsAndReplicas(m.selfId, shards, replicas, clusterConfig)
-	m.log.Debug("init metadata success.")
+	common.Debug("init metadata success.")
 
 	return shards, replicas
 }
@@ -60,7 +56,7 @@ func (m *Manager) InitSlotsAndReplicas(nodeId string, shards map[string]common.S
 	m.buckets = make([]*Bucket, 0, common.SlotsCount)
 	for _, segment := range shard.Segments {
 		for i := segment.Start; i <= segment.End; i++ {
-			b := newBucket(i, shard.NodeId, true, clusterConfig, m.shutdownCh, m.log)
+			b := newBucket(i, shard.NodeId, true, clusterConfig, m.shutdownCh)
 			m.buckets = append(m.buckets, b)
 		}
 	}
@@ -68,12 +64,12 @@ func (m *Manager) InitSlotsAndReplicas(nodeId string, shards map[string]common.S
 	for _, shard := range replicas[nodeId] {
 		for _, segment := range shard.Segments {
 			for i := segment.Start; i <= segment.End; i++ {
-				b := newBucket(i, shard.NodeId, false, clusterConfig, m.shutdownCh, m.log)
+				b := newBucket(i, shard.NodeId, false, clusterConfig, m.shutdownCh)
 				m.buckets = append(m.buckets, b)
 			}
 		}
 	}
-	m.log.Debugf("init slots and replicas success.")
+	common.Debugf("init slots and replicas success.")
 }
 
 func ExecuteSlotsAllocation(leaderId string, followers []string) map[string]common.Shard {

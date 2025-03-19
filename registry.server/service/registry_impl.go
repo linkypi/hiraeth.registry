@@ -8,13 +8,11 @@ import (
 	"github.com/linkypi/hiraeth.registry/server/cluster"
 	"github.com/linkypi/hiraeth.registry/server/config"
 	"github.com/linkypi/hiraeth.registry/server/slot"
-	"github.com/sirupsen/logrus"
 	"strconv"
 )
 
 // RegistryImpl was added to facilitate the unification of TCP and HTTP processing logic
 type RegistryImpl struct {
-	Log         *logrus.Logger
 	syner       *cluster.Syner
 	Cluster     *cluster.Cluster
 	StartUpMode config.StartUpMode
@@ -41,7 +39,7 @@ func (s *RegistryImpl) FetchMetadata() (*pb.FetchMetadataResponse, error) {
 
 	// If it is a cluster mode, you need to check the cluster status first
 	if s.Cluster.State != cluster.Active {
-		s.Log.Errorf("failed to fetch meta data, cluster state not active: %v", s.Cluster.State.String())
+		common.Errorf("failed to fetch meta data, cluster state not active: %v", s.Cluster.State.String())
 		return &pb.FetchMetadataResponse{ErrorType: pb.ErrorType_ClusterDown}, nil
 	}
 	return s.doFetchMetadata()
@@ -94,7 +92,7 @@ func (s *RegistryImpl) DoRegister(bucket *slot.Bucket, serviceName, serviceIp st
 		return errors.New("invalid port")
 	}
 	bucket.Register(serviceName, serviceIp, servicePort)
-	s.Log.Debugf("register service %s success -> %s:%d", serviceName, serviceIp, servicePort)
+	common.Debugf("register service %s success -> %s:%d", serviceName, serviceIp, servicePort)
 	return nil
 }
 

@@ -3,18 +3,15 @@ package http
 import (
 	"context"
 	"github.com/emicklei/go-restful"
-	"github.com/linkypi/hiraeth.registry/common"
+	common "github.com/linkypi/hiraeth.registry/common"
 	cpb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/api/handler"
-	"github.com/linkypi/hiraeth.registry/server/log"
 	"github.com/linkypi/hiraeth.registry/server/slot"
-	"github.com/sirupsen/logrus"
 	"net/http"
 	"time"
 )
 
 type RestServer struct {
-	log            *logrus.Logger
 	server         *http.Server
 	slotManager    *slot.Manager
 	addr           string
@@ -25,7 +22,6 @@ type RestServer struct {
 func NewClientRestServer(addr string, slotManager *slot.Manager, handlerFactory *handler.RequestHandlerFactory, shutDownCh chan struct{}) *RestServer {
 
 	server := RestServer{
-		log:            log.Log,
 		addr:           addr,
 		shutDownCh:     shutDownCh,
 		slotManager:    slotManager,
@@ -50,7 +46,7 @@ func (s *RestServer) Start() {
 	wsContainer.Filter(wsContainer.OPTIONSFilter)
 	server := &http.Server{Addr: s.addr, Handler: wsContainer}
 
-	log.Log.Infof("start http server on: %s\n", s.addr)
+	common.Infof("start http server on: %s\n", s.addr)
 	err := server.ListenAndServe()
 	if err != nil {
 		s.shutDown()
@@ -62,9 +58,9 @@ func (s *RestServer) shutDown() {
 	defer cancelFunc()
 	err := s.server.Shutdown(timeOutCtx)
 	if err != nil {
-		s.log.Errorf("failed to shut down rest server: %v", err)
+		common.Errorf("failed to shut down rest server: %v", err)
 	} else {
-		s.log.Infof("rest server is down")
+		common.Infof("rest server is down")
 	}
 	close(s.shutDownCh)
 }
@@ -98,7 +94,7 @@ func (s *RestServer) handleRegister(request *restful.Request, response *restful.
 	regRequest := cpb.RegisterRequest{ServiceName: req.ServiceName, ServiceIp: req.Ip, ServicePort: int32(req.Port)}
 	bytes, err := common.EncodePb(&regRequest)
 	if err != nil {
-		s.log.Errorf("encode sub request failed, error: %v", err)
+		common.Errorf("encode sub request failed, error: %v", err)
 		s.replyMsg(response, err.Error())
 	}
 	_ = common.Message{RequestType: common.Register, Payload: bytes, RequestId: uint64(common.GenerateId())}
@@ -116,14 +112,14 @@ func (s *RestServer) replySuccess(response *restful.Response) {
 		Success: true,
 	})
 	if err != nil {
-		s.log.Errorf("failed to write response: %v", err)
+		common.Errorf("failed to write response: %v", err)
 	}
 }
 
 func (s *RestServer) replyMsg(response *restful.Response, msg string) {
 	err := response.WriteEntity(FiledResultWithMsg(msg))
 	if err != nil {
-		s.log.Errorf("failed to write response: %v", err)
+		common.Errorf("failed to write response: %v", err)
 	}
 }
 

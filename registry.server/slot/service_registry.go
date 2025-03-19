@@ -1,11 +1,9 @@
 package slot
 
 import (
-	"github.com/linkypi/hiraeth.registry/common"
+	common "github.com/linkypi/hiraeth.registry/common"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	"github.com/linkypi/hiraeth.registry/server/log"
 	"github.com/panjf2000/gnet/pkg/pool/goroutine"
-	"github.com/sirupsen/logrus"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,20 +20,19 @@ const (
 
 type ServiceRegistry struct {
 	sync.Map
-	log        *logrus.Logger
 	workerPool *goroutine.Pool
 	trigger    SubscribeCallback
 }
 
 type SubscribeCallback func(connIds []string, serviceName string, instances []common.ServiceInstance)
 
-func NewServiceRegistry(clusterConfig config.ClusterConfig, shutdownCh chan struct{}, log *logrus.Logger) *ServiceRegistry {
-	serviceRegistry := ServiceRegistry{workerPool: goroutine.Default(), log: log}
-	go checkServiceInstanceStatePeriod(clusterConfig, shutdownCh, &serviceRegistry, log)
+func NewServiceRegistry(clusterConfig config.ClusterConfig, shutdownCh chan struct{}) *ServiceRegistry {
+	serviceRegistry := ServiceRegistry{workerPool: goroutine.Default()}
+	go checkServiceInstanceStatePeriod(clusterConfig, shutdownCh, &serviceRegistry)
 	return &serviceRegistry
 }
 
-func checkServiceInstanceStatePeriod(clusterConfig config.ClusterConfig, shutdownCh chan struct{}, serviceRegistry *ServiceRegistry, log *logrus.Logger) {
+func checkServiceInstanceStatePeriod(clusterConfig config.ClusterConfig, shutdownCh chan struct{}, serviceRegistry *ServiceRegistry) {
 	printTime := time.Now()
 	for {
 		select {
@@ -53,7 +50,7 @@ func checkServiceInstanceStatePeriod(clusterConfig config.ClusterConfig, shutdow
 				instance := value.(common.ServiceInstance)
 
 				if time.Now().Sub(printTime).Seconds() > 30 {
-					log.Debugf("service instance %s:%d lastest heartbeat time: %s, State: %s",
+					common.Debugf("service instance %s:%d lastest heartbeat time: %s, State: %s",
 						instance.InstanceIp, instance.InstancePort,
 						instance.LastHeartbeatTime, instance.State.String())
 					printTime = time.Now()
@@ -62,7 +59,7 @@ func checkServiceInstanceStatePeriod(clusterConfig config.ClusterConfig, shutdow
 				duration := time.Since(instance.LastHeartbeatTime).Seconds()
 				if duration > float64(clusterConfig.ServiceInstanceRemoveTimeoutSec) {
 
-					log.Warnf("service instance %s:%d has expired, removed from cache.",
+					common.Warnf("service instance %s:%d has expired, removed from cache.",
 						instance.InstanceIp, instance.InstancePort)
 
 					serviceRegistry.Delete(key)
@@ -76,7 +73,7 @@ func checkServiceInstanceStatePeriod(clusterConfig config.ClusterConfig, shutdow
 					return true
 				}
 				if duration > float64(clusterConfig.ServiceInstanceUnhealthyTimeoutSec) {
-					log.Warnf("service instance %s:%d is unhealth.", instance.InstanceIp, instance.InstancePort)
+					common.Warnf("service instance %s:%d is unhealth.", instance.InstanceIp, instance.InstancePort)
 					instance.State = common.UnHealthy
 					serviceRegistry.Store(key, instance)
 					return true
@@ -116,7 +113,7 @@ func (s *ServiceRegistry) removeFromInstances(instance common.ServiceInstance) [
 		if serviceInstance.InstanceIp == instance.InstanceIp && serviceInstance.InstancePort == instance.InstancePort {
 			instances = append(instances[:i], instances[i+1:]...)
 			s.Store(listKey, instances)
-			log.Log.Debugf("remove service instance %s:%d from service %s.", instance.InstanceIp, instance.InstancePort, instance.ServiceName)
+			common.Debugf("remove service instance %s:%d from service %s.", instance.InstanceIp, instance.InstancePort, instance.ServiceName)
 			return instances
 		}
 	}

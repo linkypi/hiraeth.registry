@@ -11,11 +11,9 @@ import (
 	"github.com/linkypi/hiraeth.registry/server/cluster/network"
 	"github.com/linkypi/hiraeth.registry/server/cluster/rpc"
 	"github.com/linkypi/hiraeth.registry/server/config"
-	"github.com/linkypi/hiraeth.registry/server/log"
 	"github.com/linkypi/hiraeth.registry/server/raft"
 	"github.com/linkypi/hiraeth.registry/server/service"
 	"github.com/linkypi/hiraeth.registry/server/slot"
-	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
@@ -25,7 +23,6 @@ import (
 )
 
 type Node struct {
-	log        *logrus.Logger
 	selfNode   *config.NodeInfo
 	rpcService *rpc.ClusterRpcService
 	Config     config.NodeConfig
@@ -40,8 +37,7 @@ func NewNode(config config.Config) *Node {
 		selfNode:   config.NodeConfig.SelfNode,
 		Config:     config.NodeConfig,
 		shutDownCh: make(chan struct{}),
-		rpcService: rpc.NewCRpcService(config),
-		log:        log.Log}
+		rpcService: rpc.NewCRpcService(config)}
 }
 
 func (n *Node) Start(conf config.Config) {
@@ -50,8 +46,8 @@ func (n *Node) Start(conf config.Config) {
 	defer func() {
 		if err := recover(); err != nil {
 			marshal, _ := json.Marshal(conf)
-			n.log.Debugf("faile to start node: %v, config: %s", err, string(marshal))
-			n.log.Errorf("faile to start node: %v", err)
+			common.Debugf("failed to start node: %v, config: %s", err, string(marshal))
+			common.Errorf("failed to start node: %v", err)
 			n.Shutdown()
 		}
 	}()
@@ -100,8 +96,8 @@ func (n *Node) startClientReceiver(conf config.Config, cl *cluster.Cluster, slot
 
 	codec := &common.BuildInFixedLengthCodec{Version: common.DefaultProtocolVersion}
 
-	serviceImpl := service.RegistryImpl{Cluster: cl, Log: log.Log, StartUpMode: conf.StartupMode}
-	handlerFactory := handler.NewHandlerFactory(cl, &serviceImpl, log.Log)
+	serviceImpl := service.RegistryImpl{Cluster: cl, StartUpMode: conf.StartupMode}
+	handlerFactory := handler.NewHandlerFactory(cl, &serviceImpl)
 
 	clientTcpServer := tcp.NewClientTcpServer(n.selfNode.GetExternalTcpAddr(), codec,
 		cl, conf.StartupMode, slotManager, n.shutDownCh, handlerFactory)
@@ -118,14 +114,14 @@ func RegisterPeerRpcService(grpcServer *grpc.Server, clusterService *rpc.Cluster
 }
 
 func (n *Node) Shutdown() {
-	n.log.Info("shutting down the server.")
+	common.Info("shutting down the server.")
 
 	n.grpcServer.GracefulStop()
 	n.socket.Close()
 
 	// wait for the server to shut down
 	time.Sleep(time.Second)
-	n.log.Info("server is down gracefully.")
+	common.Info("server is down gracefully.")
 	os.Exit(0)
 }
 
@@ -155,7 +151,7 @@ var defaultKeepaliveServerParameters = keepalive.ServerParameters{
 func StartGRPCServer(addr string, shutDownCh chan struct{}, serverCh chan *GrpcServer, register func(*grpc.Server)) {
 	sock, err := net.Listen("tcp", addr)
 	if err != nil {
-		common.Log.Errorf("failed to listen: %v", err)
+		common.Errorf("failed to listen: %v", err)
 		close(shutDownCh)
 		return
 	}
@@ -172,7 +168,7 @@ func StartGRPCServer(addr string, shutDownCh chan struct{}, serverCh chan *GrpcS
 
 	// start grpc server，enter an infinite loop after the startup is complete
 	if err := grpcServer.Serve(sock); err != nil {
-		common.Log.Errorf("grpc server failed to serve: %v", err)
+		common.Errorf("grpc server failed to serve: %v", err)
 		close(shutDownCh)
 	}
 }
@@ -181,7 +177,7 @@ func StartGRPCServerWithParameters(addr string, knp keepalive.EnforcementPolicy,
 	shutDownCh chan struct{}, serverCh chan *GrpcServer) {
 	sock, err := net.Listen("tcp", addr)
 	if err != nil {
-		common.Log.Errorf("failed to listen: %v", err)
+		common.Errorf("failed to listen: %v", err)
 		close(shutDownCh)
 		return
 	}
@@ -197,7 +193,7 @@ func StartGRPCServerWithParameters(addr string, knp keepalive.EnforcementPolicy,
 
 	// start grpc server，enter an infinite loop after the startup is complete
 	if err := grpcServer.Serve(sock); err != nil {
-		common.Log.Errorf("grpc server failed to serve: %v", err)
+		common.Errorf("grpc server failed to serve: %v", err)
 		close(shutDownCh)
 	}
 }
