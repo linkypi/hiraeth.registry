@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"io"
 	"regexp"
@@ -172,6 +173,10 @@ func Md5WithSalt(password, salt string) (string, error) {
 }
 
 func PrintStackTrace() {
+	PrintStackTraceWithCallback(nil)
+}
+
+func PrintStackTraceWithCallback(callback func(any)) {
 	if r := recover(); r != nil {
 		pc := make([]uintptr, 10) // 至少需要 1 个元素的切片
 		n := runtime.Callers(2, pc)
@@ -190,5 +195,34 @@ func PrintStackTrace() {
 
 		// 打印 panic 信息
 		log.Errorf("recovered from panic: %v\n  %s", r, strings.Join(stacks, ""))
+		if callback != nil {
+			callback(r)
+		}
 	}
+}
+
+func SyncMapToJSON(m *sync.Map) (string, error) {
+	// 创建一个普通的 map 来存储 sync.Map 的内容
+	tempMap := make(map[string]interface{})
+
+	// 遍历 sync.Map 并将内容存入普通 map
+	m.Range(func(key, value interface{}) bool {
+		tempMap[key.(string)] = value
+		return true
+	})
+
+	// 将普通 map 序列化为 JSON 字符串
+	jsonBytes, err := json.Marshal(tempMap)
+	if err != nil {
+		return "", err
+	}
+
+	return string(jsonBytes), nil
+}
+
+func CopySyncMap(src, dst *sync.Map) {
+	src.Range(func(key, value interface{}) bool {
+		dst.Store(key, value)
+		return true
+	})
 }

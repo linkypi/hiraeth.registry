@@ -43,14 +43,20 @@ func NewNode(config config.Config) *Node {
 func (n *Node) Start(conf config.Config) {
 
 	n.Network = network.NewNetworkManager(n.selfNode.Addr)
-	defer func() {
-		if err := recover(); err != nil {
-			marshal, _ := json.Marshal(conf)
-			common.Debugf("failed to start node: %v, config: %s", err, string(marshal))
-			common.Errorf("failed to start node: %v", err)
-			n.Shutdown()
-		}
-	}()
+	defer common.PrintStackTraceWithCallback(func(err any) {
+		marshal, _ := json.Marshal(conf)
+		common.Debugf("failed to start node: %v, config: %s", err, string(marshal))
+		common.Errorf("failed to start node: %v", err)
+		n.Shutdown()
+	})
+	//defer func() {
+	//	if err := recover(); err != nil {
+	//		marshal, _ := json.Marshal(conf)
+	//		common.Debugf("failed to start node: %v, config: %s", err, string(marshal))
+	//		common.Errorf("failed to start node: %v", err)
+	//		n.Shutdown()
+	//	}
+	//}()
 	// since grpc will enter a loop after starting
 	// we need to use a channel to notify grpcServer
 	// has assigned if it has been started

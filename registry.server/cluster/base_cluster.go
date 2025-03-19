@@ -34,13 +34,13 @@ type BaseCluster struct {
 
 	lastStateTime time.Time
 	ClusterId     uint64
-	MetaData      MetaData
+	MetaData      *MetaData
 
 	// all cluster nodes configured in the configuration
-	ClusterExpectedNodes map[string]config.NodeInfo
+	ClusterExpectedNodes sync.Map
 
 	// The actual cluster nodes
-	ClusterActualNodes map[string]config.NodeInfo
+	ClusterActualNodes sync.Map
 
 	OtherCandidateNodes []config.NodeInfo
 	joinCluster         bool
@@ -75,6 +75,25 @@ func (s State) String() string {
 	return names[s]
 }
 
+func NewBaseCluster(conf *config.Config, selfNode *config.NodeInfo, slotManager *slot.Manager,
+	net *network.Manager, shutDownCh chan struct{}) *BaseCluster {
+	cluster := BaseCluster{
+		StartUpMode: conf.StartupMode,
+		joinCluster: conf.JoinCluster,
+		Config:      &conf.ClusterConfig,
+		NodeConfig:  &conf.NodeConfig,
+		ShutDownCh:  shutDownCh,
+		SelfNode:    selfNode,
+		notifyCh:    make(chan bool, 10),
+		SlotManager: slotManager,
+		MetaData: &MetaData{
+			State: Initializing.String(),
+		},
+		State: Initializing,
+	}
+	return &cluster
+}
+
 func (b *BaseCluster) SetState(state State) {
 	b.StateMtx.Lock()
 	defer b.StateMtx.Unlock()
@@ -98,23 +117,28 @@ func (b *BaseCluster) RaftExistNode(id string) bool {
 }
 
 // GetOtherCandidateServers get other candidate servers, exclude self node
-func (b *BaseCluster) GetOtherCandidateServers() []config.NodeInfo {
-	var filtered []config.NodeInfo
-	for _, node := range b.ClusterExpectedNodes {
+func (b *BaseCluster) GetOtherCandidateServers() []*config.NodeInfo {
+	var filtered []*config.NodeInfo
+	b.ClusterExpectedNodes.Range(func(key, value interface{}) bool {
+		node := value.(*config.NodeInfo)
 		if node.IsCandidate {
 			filtered = append(filtered, node)
 		}
-	}
+		return true
+	})
+
 	return filtered
 }
 
-func (b *BaseCluster) GetOtherNodes(selfId string) []config.NodeInfo {
-	var filtered = make([]config.NodeInfo, 0, 8)
-	for _, node := range b.ClusterExpectedNodes {
+func (b *BaseCluster) GetOtherNodes(selfId string) []*config.NodeInfo {
+	var filtered = make([]*config.NodeInfo, 0, 8)
+	b.ClusterExpectedNodes.Range(func(key, value interface{}) bool {
+		node := value.(*config.NodeInfo)
 		if node.Id != selfId {
 			filtered = append(filtered, node)
 		}
-	}
+		return true
+	})
 	return filtered
 }
 
@@ -126,7 +150,7 @@ func (b *BaseCluster) MapToList(nodes map[string]config.NodeInfo) []config.NodeI
 	return result
 }
 
-func (b *BaseCluster) GetAddresses(nodes []config.NodeInfo) []string {
+func (b *BaseCluster) GetAddresses(nodes []*config.NodeInfo) []string {
 	var result = make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		result = append(result, node.Addr)
@@ -142,7 +166,7 @@ func (b *BaseCluster) CopyClusterNodes(nodes map[string]*config.NodeInfo) map[st
 	return result
 }
 
-func (b *BaseCluster) GetNodeIdsIgnoreSelf(clusterServers []config.NodeInfo) []string {
+func (b *BaseCluster) GetNodeIdsIgnoreSelf(clusterServers []*config.NodeInfo) []string {
 	arr := make([]string, 0, len(clusterServers))
 	for _, node := range clusterServers {
 		if node.Id != b.SelfNode.Id {
@@ -152,18 +176,20 @@ func (b *BaseCluster) GetNodeIdsIgnoreSelf(clusterServers []config.NodeInfo) []s
 	return arr
 }
 
-func (b *BaseCluster) getNodesByRaftServers(servers []raft.Server) []config.NodeInfo {
-	var result = make([]config.NodeInfo, 0, len(servers))
+func (b *BaseCluster) getNodesByRaftServers(servers []raft.Server) []*config.NodeInfo {
+	var result = make([]*config.NodeInfo, 0, len(servers))
 	for _, server := range servers {
-		for _, node := range b.ClusterExpectedNodes {
+		b.ClusterExpectedNodes.Range(func(key, value interface{}) bool {
+			node := value.(*config.NodeInfo)
 			if node.Addr == string(server.Address) {
 				if server.Suffrage == raft.Voter {
 					node.IsCandidate = true
 				}
 				result = append(result, node)
-				break
+				return false
 			}
-		}
+			return true
+		})
 	}
 	return result
 }
@@ -180,11 +206,7 @@ func (b *BaseCluster) GetClusterExpectedNodeIds(clusterServers map[string]*confi
 }
 
 func (b *BaseCluster) RemoveNode(nodeId string) {
-	for _, node := range b.ClusterExpectedNodes {
-		if node.Id != nodeId {
-			delete(b.ClusterExpectedNodes, node.Id)
-		}
-	}
+	b.ClusterExpectedNodes.Delete(nodeId)
 }
 
 func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode config.NodeInfo, throwEx bool) error {
@@ -199,19 +221,19 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 		return errors.New(msg)
 	}
 
-	node, ok := b.ClusterExpectedNodes[remoteNode.Id]
+	node, ok := b.ClusterExpectedNodes.Load(remoteNode.Id)
 	if !ok {
 		// it is possible that a node is missing from the cluster address
 		// configuration in the node, or it may be a new node
 		msg := fmt.Sprintf("[cluster] remote node [%s][%s] not found int cluster servers, add it to cluster.", remoteNode.Id, remoteNode.Addr)
 		common.Info(msg)
-		node = remoteNode
-		b.ClusterExpectedNodes[remoteNode.Id] = node
-		b.ClusterActualNodes[remoteNode.Id] = node
-		if node.IsCandidate {
-			b.OtherCandidateNodes = append(b.OtherCandidateNodes, node)
+		b.ClusterExpectedNodes.Store(remoteNode.Id, &remoteNode)
+		b.ClusterActualNodes.Store(remoteNode.Id, &remoteNode)
+		if remoteNode.IsCandidate {
+			b.OtherCandidateNodes = append(b.OtherCandidateNodes, remoteNode)
 		}
 	} else {
+		node := node.(*config.NodeInfo)
 		if node.Addr != remoteNode.Addr {
 			msg := fmt.Sprintf("[cluster] update remote node info failed, node id exist, but addr not match: %s, %s, %s",
 				remoteNode.Id, node.Addr, remoteNode.Addr)
@@ -224,7 +246,7 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 		node.IsCandidate = remoteNode.IsCandidate
 		node.ExternalHttpPort = remoteNode.ExternalHttpPort
 		node.ExternalTcpPort = remoteNode.ExternalTcpPort
-		b.ClusterActualNodes[node.Id] = node
+		b.ClusterActualNodes.Store(node.Id, &node)
 	}
 
 	common.Infof("[cluster] update remote node info: %s, %s", remoteNode.Id, remoteNode.Addr)

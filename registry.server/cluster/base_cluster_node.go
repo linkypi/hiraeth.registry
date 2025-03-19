@@ -27,8 +27,8 @@ func (b *BaseCluster) startRaftNode(dataDir string) {
 	// The nodes that come in here should be the nodes that
 	// have been connected and satisfy the election quorum number
 	// not the nodes in the cluster.server.addr configuration
-	connectedNodes := b.GetConnectedNodes(b.ClusterExpectedNodes)
-	connectedNodes = append(connectedNodes, *b.SelfNode)
+	connectedNodes := b.GetConnectedNodes(&b.ClusterExpectedNodes)
+	connectedNodes = append(connectedNodes, b.SelfNode)
 	var peers = make([]raft.Server, 0, len(connectedNodes))
 	for _, node := range connectedNodes {
 		suffrage := raft.Voter
@@ -68,10 +68,10 @@ func (b *BaseCluster) UpdateLeader(term uint64, id, addr string) {
 	b.Leader.Term = term
 }
 
-func (b *BaseCluster) notifyAllNodesLeaderShipTransferStatus(clusterNodes []config.NodeInfo, status pb.TransferStatus) bool {
+func (b *BaseCluster) notifyAllNodesLeaderShipTransferStatus(clusterNodes []*config.NodeInfo, status pb.TransferStatus) bool {
 
 	total := len(clusterNodes)
-	numOfAck, _, success := common.WaitForAllExecDone(clusterNodes, func(n config.NodeInfo) bool {
+	numOfAck, _, success := common.WaitForAllExecDone(clusterNodes, func(n *config.NodeInfo) bool {
 		return b.notifyLeaderShipTransferStatus(n, status)
 	})
 
@@ -83,14 +83,14 @@ func (b *BaseCluster) notifyAllNodesLeaderShipTransferStatus(clusterNodes []conf
 	return true
 }
 
-func (b *BaseCluster) verifyAllFollowers() (int, []config.NodeInfo, int) {
+func (b *BaseCluster) verifyAllFollowers() (int, []*config.NodeInfo, int) {
 
 	raftConf := b.Raft.GetConfiguration().Configuration()
 	nodes := b.getNodesByRaftServers(raftConf.Servers)
 
 	total := len(nodes)
 
-	numOfAck, ackFollowers, _ := common.WaitForAllExecDone(nodes, func(server config.NodeInfo) bool {
+	numOfAck, ackFollowers, _ := common.WaitForAllExecDone(nodes, func(server *config.NodeInfo) bool {
 		addr := string(server.Addr)
 		if b.Leader != nil && addr == b.Leader.Addr {
 			return true
@@ -130,7 +130,7 @@ func (b *BaseCluster) verifyFollower(addr string) bool {
 	return true
 }
 
-func (b *BaseCluster) notifyLeaderShipTransferStatus(node config.NodeInfo, status pb.TransferStatus) bool {
+func (b *BaseCluster) notifyLeaderShipTransferStatus(node *config.NodeInfo, status pb.TransferStatus) bool {
 
 	if node.Id == b.Leader.Id {
 		return true
@@ -183,10 +183,10 @@ func (b *BaseCluster) notifyLeaderShipTransferStatus(node config.NodeInfo, statu
 	return true
 }
 
-func (b *BaseCluster) publishMetaDataToAllNodes(metaData MetaData) bool {
+func (b *BaseCluster) publishMetaDataToAllNodes(metaData *MetaData) bool {
 
-	nodes := b.GetConnectedNodes(b.ClusterExpectedNodes)
-	numOfAck, _, success := common.WaitForAllExecDone(nodes, func(n config.NodeInfo) bool {
+	nodes := b.GetConnectedNodes(&b.ClusterExpectedNodes)
+	numOfAck, _, success := common.WaitForAllExecDone(nodes, func(n *config.NodeInfo) bool {
 		return b.publishMetaData(n, metaData)
 	})
 
@@ -198,7 +198,7 @@ func (b *BaseCluster) publishMetaDataToAllNodes(metaData MetaData) bool {
 	return true
 }
 
-func (b *BaseCluster) publishMetaData(node config.NodeInfo, metaData MetaData) bool {
+func (b *BaseCluster) publishMetaData(node *config.NodeInfo, metaData *MetaData) bool {
 
 	jsonBytes, err := json.Marshal(metaData)
 	if err != nil {
@@ -284,7 +284,7 @@ func (b *BaseCluster) Shutdown() {
 	time.Sleep(time.Second)
 }
 
-func (b *BaseCluster) ConnectToNode(remoteNode config.NodeInfo) {
+func (b *BaseCluster) ConnectToNode(remoteNode *config.NodeInfo) {
 
 	if remoteNode.Id == b.SelfNode.Id {
 		return
@@ -340,7 +340,7 @@ func (b *BaseCluster) ConnectToNode(remoteNode config.NodeInfo) {
 }
 
 // exchange information between the two nodes in preparation for the creation of a myCluster
-func (b *BaseCluster) getRemoteNodeInfo(remoteNode config.NodeInfo) {
+func (b *BaseCluster) getRemoteNodeInfo(remoteNode *config.NodeInfo) {
 
 	// handle the problem of cluster configuration mismatch when updating remote node
 	// if the cluster configuration does not match, it will exit directly
@@ -404,6 +404,9 @@ func (b *BaseCluster) getRemoteNodeInfo(remoteNode config.NodeInfo) {
 
 		// update cluster node config
 		_ = b.UpdateRemoteNode(remoteNode, *b.SelfNode, true)
+
+		// update raft node
+
 		return
 	}
 }
@@ -420,24 +423,25 @@ func (b *BaseCluster) ApplyClusterMetaData(err error, req *pb.PublishMetadataReq
 		return errors.New("unmarshal metadata failed")
 	}
 
-	jsonBytes, _ := json.Marshal(metaData.ActualNodeMap)
-	common.Debugf("meta data actual node map: %s", string(jsonBytes))
+	toJSON, _ := common.SyncMapToJSON(&metaData.ActualNodeMap)
+	common.Debugf("meta data actual node map: %s", toJSON)
 
 	// update cluster node config
-	b.ClusterActualNodes = metaData.ActualNodeMap
+	common.CopySyncMap(&metaData.ActualNodeMap, &b.ClusterActualNodes)
 
-	jsonBytes, _ = json.Marshal(b.ClusterActualNodes)
-	common.Debugf("update cluster actual nodes to: %s", string(jsonBytes))
+	toJSON, _ = common.SyncMapToJSON(&b.ClusterActualNodes)
+	common.Debugf("update cluster actual nodes to: %s", toJSON)
 
 	metaData.State = b.State.String()
 	metaData.NodeConfig = *b.NodeConfig
 	metaData.CreateTime = time.Now().Format("2006-01-02 15:04:05")
-	b.MetaData = metaData
+	b.MetaData = metaData.DeepCopy()
+
 	b.ClusterId = metaData.ClusterId
 
 	common.Debugf("cluster id update to: %d", b.ClusterId)
-
-	err = common.PersistToJsonFileWithCheckSum(b.NodeConfig.DataDir+MetaDataFileName, metaData)
+	jsonStr, _ := metaData.ToJSON()
+	err = common.PersistToJsonFileWithCheckSum(b.NodeConfig.DataDir+MetaDataFileName, jsonStr)
 	if err != nil {
 		common.Errorf("[follower] persist meta data failed: %v", err)
 		return errors.New("persist metadata failed")

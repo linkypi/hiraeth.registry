@@ -27,21 +27,13 @@ func NewCluster(conf *config.Config, selfNode *config.NodeInfo, slotManager *slo
 	net *network.Manager, shutDownCh chan struct{}) *Cluster {
 
 	cluster := Cluster{
-		BaseCluster: &BaseCluster{
-			StartUpMode: conf.StartupMode,
-			joinCluster: conf.JoinCluster,
-			Config:      &conf.ClusterConfig,
-			NodeConfig:  &conf.NodeConfig,
-			ShutDownCh:  shutDownCh,
-			SelfNode:    selfNode,
-			notifyCh:    make(chan bool, 10),
-			SlotManager: slotManager,
-		},
+		BaseCluster: NewBaseCluster(conf, selfNode, slotManager, net, shutDownCh),
 	}
-	clusterNodes := cluster.CopyClusterNodes(conf.ClusterConfig.ClusterServers)
-	cluster.ClusterExpectedNodes = clusterNodes
-	cluster.ClusterActualNodes = clusterNodes
-	cluster.SetState(Initializing)
+
+	for id, node := range conf.ClusterConfig.ClusterServers {
+		cluster.ClusterActualNodes.Store(id, node)
+		cluster.ClusterExpectedNodes.Store(id, node)
+	}
 	cluster.setNet(net)
 	return &cluster
 }
@@ -67,7 +59,12 @@ func (c *Cluster) Start(dataDir string) {
 	go c.monitoringClusterState()
 
 	go c.CheckConnClosed(c.ShutDownCh, func(id string) {
-		nodeInfo := c.ClusterActualNodes[id]
+		node, ok := c.ClusterActualNodes.Load(id)
+		if !ok {
+			common.Errorf("node %s is not found in the cluster", id)
+			return
+		}
+		nodeInfo := node.(*config.NodeInfo)
 		common.Infof("node %s is disconnected, re-establish the connection: %s", nodeInfo.Id, nodeInfo.Addr)
 		c.ConnectToNode(nodeInfo)
 	})
@@ -178,7 +175,7 @@ func (c *Cluster) transferLeaderShip() {
 }
 
 func (c *Cluster) joinToCluster() {
-	connectedNodes := c.Manager.GetConnectedNodes(c.ClusterExpectedNodes)
+	connectedNodes := c.Manager.GetConnectedNodes(&c.ClusterExpectedNodes)
 	for _, node := range connectedNodes {
 		rpcClient := c.Manager.GetInterRpcClient(node.Id)
 		request := pb.JoinClusterRequest{

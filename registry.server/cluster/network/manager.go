@@ -66,28 +66,28 @@ func (net *Manager) GetConnectedNodeIds(clusterServers map[string]*config.NodeIn
 	return arr
 }
 
-func (net *Manager) GetConnectedNodes(clusterServers map[string]config.NodeInfo) []config.NodeInfo {
-	arr := make([]config.NodeInfo, 0, 8)
-	for _, node := range clusterServers {
+func (net *Manager) GetConnectedNodes(clusterServers *sync.Map) []*config.NodeInfo {
+	arr := make([]*config.NodeInfo, 0, 8)
+	clusterServers.Range(func(key, value interface{}) bool {
+		node := value.(*config.NodeInfo)
 		_, ok := net.Connections[node.Id]
 		if ok {
 			arr = append(arr, node)
 		}
-	}
+		return true
+	})
 	return arr
 }
 
 func (net *Manager) GetRaftClient(id string) (*pb.RaftTransportClient, error) {
+	defer common.PrintStackTrace()
 	if !net.ExistConn(id) {
 		return nil, errors.New("connection not exist, id: " + id)
 	}
-	conn := net.Connections[id]
-
-	defer func() {
-		if err := recover(); err != nil {
-			common.Errorf("panic when get raft client, id: %s, err: %v", id, err)
-		}
-	}()
+	conn, ok := net.Connections[id]
+	if !ok {
+		return nil, errors.New("connection not exist, id: " + id)
+	}
 	if conn.raftClient == nil {
 		common.Warnf("raft connection to node %s is nil, rpc con: %s.", id, conn.grpcConn.Target())
 	}

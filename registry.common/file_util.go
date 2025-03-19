@@ -64,7 +64,15 @@ func saveJsonFile(filePath string, obj any) error {
 }
 
 func PersistToJsonFileWithCheckSum(filePath string, content any) error {
-	bytes, _ := json.Marshal(content)
+	var bytes []byte
+	switch content.(type) {
+	case string:
+		bytes = []byte(content.(string))
+		break
+	default:
+		bytes, _ = json.Marshal(content)
+	}
+
 	file, err := os.Create(filePath)
 	if err != nil {
 		return err

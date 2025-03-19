@@ -118,3 +118,35 @@ func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server, clusterCo
 //	rn.log.Info("deleted peers.json file after successful recovery")
 //	return nil
 //}
+
+func (rn *RaftNode) AddNode(raftInstance *raft.Raft, nodeId, nodeAddr string, suffrage raft.ServerSuffrage, prevLogIndex uint64) error {
+	if raftInstance == nil {
+		return fmt.Errorf("raft instance is nil")
+	}
+
+	server := raft.Server{
+		ID:       raft.ServerID(nodeId),
+		Address:  raft.ServerAddress(nodeAddr),
+		Suffrage: suffrage,
+	}
+
+	future := raftInstance.AddVoter(server.ID, server.Address, prevLogIndex, time.Second*10)
+	if err := future.Error(); err != nil {
+		return fmt.Errorf("failed to add node %s: %v", nodeId, err)
+	}
+
+	return nil
+}
+
+func (rn *RaftNode) RemoveNode(raftInstance *raft.Raft, nodeId string) error {
+	if raftInstance == nil {
+		return fmt.Errorf("raft instance is nil")
+	}
+
+	future := raftInstance.RemoveServer(raft.ServerID(nodeId), 0, time.Second*10)
+	if err := future.Error(); err != nil {
+		return fmt.Errorf("failed to remove node %s: %v", nodeId, err)
+	}
+
+	return nil
+}

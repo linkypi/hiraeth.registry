@@ -33,7 +33,7 @@ var (
 	buildClusterErr = errors.New("build cluster failed")
 )
 
-func (l *Leader) buildCluster(nodes []config.NodeInfo) bool {
+func (l *Leader) buildCluster(nodes []*config.NodeInfo) bool {
 	// Notify the follower node that the leader has been transferred,
 	// and the cluster no longer receives write requests and only processes read requests
 	// After the data migration is complete, the cluster is back to Active
@@ -81,11 +81,13 @@ func (l *Leader) buildCluster(nodes []config.NodeInfo) bool {
 	return true
 }
 
-func (l *Leader) removeInvalidServerInCluster(actualClusterNodes []config.NodeInfo) {
+func (l *Leader) removeInvalidServerInCluster(actualClusterNodes []*config.NodeInfo) {
 	a := set.New(set.ThreadSafe)
-	for _, node := range l.ClusterExpectedNodes {
+	l.ClusterExpectedNodes.Range(func(key, value interface{}) bool {
+		node := value.(*config.NodeInfo)
 		a.Add(node.Id)
-	}
+		return true
+	})
 
 	b := set.New(set.ThreadSafe)
 	for _, server := range actualClusterNodes {
@@ -101,23 +103,24 @@ func (l *Leader) removeInvalidServerInCluster(actualClusterNodes []config.NodeIn
 		}
 		common.Warnf("[cluster] removed invalid node %s in raft", s)
 	}
-
-	for _, an := range l.ClusterActualNodes {
+	l.ClusterActualNodes.Range(func(key, value interface{}) bool {
+		node := value.(*config.NodeInfo)
 		exist := false
-		for _, node := range actualClusterNodes {
-			if an.Id == node.Id {
+		for _, n := range actualClusterNodes {
+			if node.Id == n.Id {
 				exist = true
-				an.IsCandidate = node.IsCandidate
+				node.IsCandidate = n.IsCandidate
 				break
 			}
 		}
 		if !exist {
-			delete(l.ClusterActualNodes, an.Id)
+			l.ClusterActualNodes.Delete(node.Id)
 		}
-	}
+		return true
+	})
 }
 
-func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
+func (l *Leader) buildMetaData(clusterNodes []*config.NodeInfo) error {
 	if clusterNodes == nil || len(clusterNodes) == 0 {
 		return errors.New("cluster nodes is empty")
 	}
@@ -125,48 +128,53 @@ func (l *Leader) buildMetaData(clusterNodes []config.NodeInfo) error {
 	followerIds := l.GetNodeIdsIgnoreSelf(clusterNodes)
 	shards, replicas := l.SlotManager.AllocateSlots(l.Leader.Id, followerIds, *l.Config)
 
-	marshal, err := json.Marshal(l.ClusterActualNodes)
+	toJSON, err := common.SyncMapToJSON(&l.ClusterActualNodes)
 	if err != nil {
 		return err
 	}
-	common.Debugf("cluster actual nodes before build meta data: %s", string(marshal))
+	common.Debugf("cluster actual nodes before build meta data: %s", toJSON)
 
-	actualNodesMap := l.ClusterActualNodes
-	actualNodes := l.MapToList(actualNodesMap)
-
+	actualNodes := make([]config.NodeInfo, 5)
+	l.ClusterActualNodes.Range(func(key, value interface{}) bool {
+		node := value.(*config.NodeInfo)
+		actualNodes = append(actualNodes, *node)
+		return true
+	})
 	formattedTime := time.Now().Format("2006-01-02 15:04:05")
 
 	atomic.AddUint64(&l.ClusterId, 1)
 	// persist the meta data
 	metaData := MetaData{
-		State:           l.State.String(),
-		ClusterId:       l.ClusterId,
-		LeaderId:        l.Leader.Id,
-		Term:            l.Leader.Term,
-		Shards:          shards,
-		Replicas:        replicas,
-		NodeConfig:      *l.NodeConfig,
-		ClusterConfig:   *l.Config,
-		ExpectedNodeMap: l.ClusterExpectedNodes,
-		ActualNodeMap:   actualNodesMap,
-		ActualNodes:     actualNodes,
-		CreateTime:      formattedTime,
+		State:         l.State.String(),
+		ClusterId:     l.ClusterId,
+		LeaderId:      l.Leader.Id,
+		Term:          l.Leader.Term,
+		Shards:        shards,
+		Replicas:      replicas,
+		NodeConfig:    *l.NodeConfig,
+		ClusterConfig: *l.Config,
+		ActualNodes:   actualNodes,
+		CreateTime:    formattedTime,
 	}
 
-	marshal, err = json.Marshal(&metaData)
+	common.CopySyncMap(&l.ClusterActualNodes, &metaData.ActualNodeMap)
+	common.CopySyncMap(&l.ClusterExpectedNodes, &metaData.ExpectedNodeMap)
+
+	marshal, err := json.Marshal(&metaData)
 	if err != nil {
 		return err
 	}
 	common.Debugf("meta data: %s", string(marshal))
 
-	err = common.PersistToJsonFileWithCheckSum(l.NodeConfig.DataDir+MetaDataFileName, metaData)
+	jsonStr, _ := metaData.ToJSON()
+	err = common.PersistToJsonFileWithCheckSum(l.NodeConfig.DataDir+MetaDataFileName, jsonStr)
 	if err != nil {
 		common.Errorf("persist meta data failed: %v", err)
 		return err
 	}
 
-	l.MetaData = metaData
-	success := l.publishMetaDataToAllNodes(metaData)
+	l.MetaData = &metaData
+	success := l.publishMetaDataToAllNodes(&metaData)
 	if !success {
 		return buildClusterErr
 	}
@@ -182,7 +190,7 @@ func (l *Leader) AddNewNode(remoteNode *config.NodeInfo) error {
 	}
 	// Check whether the connection of the new node exists, and if not, establish the connection first
 	if !l.ExistConn(remoteNode.Id) {
-		l.ConnectToNode(*remoteNode)
+		l.ConnectToNode(remoteNode)
 	}
 	if l.State != Active {
 		common.Errorf("[cluster] cluster state is not active: %s, can not add new node, id: %s, addr: %s",

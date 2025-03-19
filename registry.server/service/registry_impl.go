@@ -51,9 +51,12 @@ func (s *RegistryImpl) doFetchMetadata() (*pb.FetchMetadataResponse, error) {
 		return nil, err
 	}
 	nodes := make(map[string]string)
-	for _, nodeInfo := range s.Cluster.ClusterActualNodes {
+	s.Cluster.ClusterActualNodes.Range(func(key, value interface{}) bool {
+		nodeInfo := value.(*config.NodeInfo)
 		nodes[nodeInfo.Id] = nodeInfo.Ip + ":" + strconv.Itoa(nodeInfo.ExternalTcpPort)
-	}
+		return true
+	})
+
 	return &pb.FetchMetadataResponse{Shards: string(jsonBytes), Nodes: nodes}, nil
 }
 
