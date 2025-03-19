@@ -9,6 +9,7 @@ import (
 	pb "github.com/linkypi/hiraeth.registry/common/proto"
 	"github.com/linkypi/hiraeth.registry/server/cluster/network"
 	"github.com/linkypi/hiraeth.registry/server/config"
+	raft2 "github.com/linkypi/hiraeth.registry/server/raft"
 	"github.com/linkypi/hiraeth.registry/server/slot"
 	"strconv"
 	"sync"
@@ -24,7 +25,7 @@ type BaseCluster struct {
 	metaDataMtx sync.Mutex
 
 	Leader      *Leader
-	Raft        *raft.Raft
+	Raft        *raft2.RaftNode
 	StartUpMode config.StartUpMode
 	Config      *config.ClusterConfig
 	NodeConfig  *config.NodeConfig
@@ -75,8 +76,7 @@ func (s State) String() string {
 	return names[s]
 }
 
-func NewBaseCluster(conf *config.Config, selfNode *config.NodeInfo, slotManager *slot.Manager,
-	net *network.Manager, shutDownCh chan struct{}) *BaseCluster {
+func NewBaseCluster(conf *config.Config, selfNode *config.NodeInfo, slotManager *slot.Manager, shutDownCh chan struct{}) *BaseCluster {
 	cluster := BaseCluster{
 		StartUpMode: conf.StartupMode,
 		joinCluster: conf.JoinCluster,
@@ -233,20 +233,20 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 			b.OtherCandidateNodes = append(b.OtherCandidateNodes, remoteNode)
 		}
 	} else {
-		node := node.(*config.NodeInfo)
-		if node.Addr != remoteNode.Addr {
+		nd := node.(*config.NodeInfo)
+		if nd.Addr != remoteNode.Addr {
 			msg := fmt.Sprintf("[cluster] update remote node info failed, node id exist, but addr not match: %s, %s, %s",
-				remoteNode.Id, node.Addr, remoteNode.Addr)
+				remoteNode.Id, nd.Addr, remoteNode.Addr)
 			common.Error(msg)
 			if throwEx {
 				panic(msg)
 			}
 			return errors.New(msg)
 		}
-		node.IsCandidate = remoteNode.IsCandidate
-		node.ExternalHttpPort = remoteNode.ExternalHttpPort
-		node.ExternalTcpPort = remoteNode.ExternalTcpPort
-		b.ClusterActualNodes.Store(node.Id, &node)
+		nd.IsCandidate = remoteNode.IsCandidate
+		nd.ExternalHttpPort = remoteNode.ExternalHttpPort
+		nd.ExternalTcpPort = remoteNode.ExternalTcpPort
+		b.ClusterActualNodes.Store(nd.Id, nd)
 	}
 
 	common.Infof("[cluster] update remote node info: %s, %s", remoteNode.Id, remoteNode.Addr)

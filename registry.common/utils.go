@@ -103,7 +103,7 @@ func RecordTimeCostIfExceeded(exceedMs int64, flag string) func() {
 	start := time.Now()
 	pc, _, line, ok := runtime.Caller(1)
 	if !ok {
-		log.Errorf("runtime.Caller occur error", nil)
+		logx.Errorf("runtime.Caller occur error", nil)
 		return func() {}
 	}
 
@@ -117,7 +117,7 @@ func RecordTimeCostIfExceeded(exceedMs int64, flag string) func() {
 			fmt.Printf(fmt.Sprintf("%s %s:%d, execute exceed %dms, cost %dms %s\n",
 				TimeToMsString(time.Now()), funcName, line, exceedMs, cost, flag))
 			msg := fmt.Sprintf("%s:%d, execute exceed %dms, cost %dms %s", funcName, line, exceedMs, cost, flag)
-			log.Errorf(msg, nil)
+			logx.Errorf(msg, nil)
 		}
 	}
 }
@@ -126,7 +126,7 @@ func RecordTimeCost(flag string) func() {
 	start := time.Now()
 	pc, _, line, ok := runtime.Caller(1)
 	if !ok {
-		log.Errorf("runtime.Caller occur error", nil)
+		logx.Errorf("runtime.Caller occur error", nil)
 		return func() {}
 	}
 
@@ -137,7 +137,7 @@ func RecordTimeCost(flag string) func() {
 	return func() {
 		cost := time.Since(start).Milliseconds()
 		msg := fmt.Sprintf("%s %s:%d %s cost %dms ", TimeToMsString(time.Now()), funcName, line, flag, cost)
-		log.Info(msg)
+		logx.Info(msg)
 	}
 }
 
@@ -178,12 +178,12 @@ func PrintStackTrace() {
 
 func PrintStackTraceWithCallback(callback func(any)) {
 	if r := recover(); r != nil {
-		pc := make([]uintptr, 10) // 至少需要 1 个元素的切片
+		pc := make([]uintptr, 20)
 		n := runtime.Callers(2, pc)
 		frames := runtime.CallersFrames(pc[:n])
 
 		stacks := make([]string, 0)
-		for i := 3; i < n; i++ {
+		for i := 0; i < n; i++ {
 			frame, more := frames.Next()
 			if !more {
 				break
@@ -194,7 +194,7 @@ func PrintStackTraceWithCallback(callback func(any)) {
 		}
 
 		// 打印 panic 信息
-		log.Errorf("recovered from panic: %v\n  %s", r, strings.Join(stacks, ""))
+		logx.Errorf("recovered from panic: %v\n  %s", r, strings.Join(stacks, ""))
 		if callback != nil {
 			callback(r)
 		}

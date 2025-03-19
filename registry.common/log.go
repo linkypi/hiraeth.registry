@@ -3,15 +3,17 @@ package common
 import (
 	"bytes"
 	"fmt"
+	hclog "github.com/hashicorp/go-hclog"
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
 	"github.com/sirupsen/logrus"
 	"io"
+	"log"
 	"os"
 	"path"
 	"time"
 )
 
-var log = logrus.New()
+var logx = logrus.New()
 
 type Formatter struct {
 }
@@ -25,29 +27,29 @@ const (
 
 // 包级别日志函数
 var (
-	Trace  = log.Trace
-	Tracef = log.Tracef
-	Debug  = log.Debug
-	Debugf = log.Debugf
-	Info   = log.Info
-	Infof  = log.Infof
-	Warn   = log.Warn
-	Warnf  = log.Warnf
-	Error  = log.Error
-	Errorf = log.Errorf
-	Fatal  = log.Fatal
-	Fatalf = log.Fatalf
-	Panic  = log.Panic
-	Panicf = log.Panicf
+	Trace  = logx.Trace
+	Tracef = logx.Tracef
+	Debug  = logx.Debug
+	Debugf = logx.Debugf
+	Info   = logx.Info
+	Infof  = logx.Infof
+	Warn   = logx.Warn
+	Warnf  = logx.Warnf
+	Error  = logx.Error
+	Errorf = logx.Errorf
+	Fatal  = logx.Fatal
+	Fatalf = logx.Fatalf
+	Panic  = logx.Panic
+	Panicf = logx.Panicf
 )
 
 func GetLogger() *logrus.Logger {
-	return log
+	return logx
 }
 
 // WithFields 暴露WithFields方法
 func WithFields(fields logrus.Fields) *logrus.Entry {
-	return log.WithFields(fields)
+	return logx.WithFields(fields)
 }
 func (t Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 	// display colors according to different levels
@@ -72,17 +74,24 @@ func (t Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 
 	timestamp := entry.Time.Format("2006-01-02 15:04:06.000")
 	id := GetGoroutineId()
+	var customFields string
+	if len(entry.Data) > 0 {
+		for key, value := range entry.Data {
+			customFields += fmt.Sprintf(" %s=%v", key, value)
+		}
+	}
+
 	if entry.HasCaller() {
 		// customize the file path
 		//funcName := entry.Caller.Function
 		filePath := fmt.Sprintf("%s:%d", path.Base(entry.Caller.File), entry.Caller.Line)
 		// customize the output format
-		fmt.Fprintf(buffer, "[%s] \033[%dm[%s]\033[0m %s [%d] %s \n", timestamp,
-			levelColor, entry.Level, filePath, id, entry.Message)
+		fmt.Fprintf(buffer, "[%s] \033[%dm[%s]\033[0m %s [%d] %s%s \n", timestamp,
+			levelColor, entry.Level, filePath, id, entry.Message, customFields)
 
 	} else {
-		fmt.Fprintf(buffer, "[%s] \033[%dm[%s]\033[0m %s \n",
-			timestamp, levelColor, entry.Level, entry.Message)
+		fmt.Fprintf(buffer, "[%s] \033[%dm[%s]\033[0m %s%s \n",
+			timestamp, levelColor, entry.Level, entry.Message, customFields)
 	}
 	return buffer.Bytes(), nil
 }
@@ -94,9 +103,9 @@ func InitLogger(logDir string, logLevel logrus.Level) {
 		_ = os.MkdirAll(logDir, 0755)
 	}
 
-	log.SetReportCaller(true)
-	log.SetLevel(logLevel)
-	log.SetFormatter(&Formatter{})
+	logx.SetReportCaller(true)
+	logx.SetLevel(logLevel)
+	logx.SetFormatter(&Formatter{})
 
 	// 配置日志分割
 	infoWriter := createRotateWriter(logDir, "info")
@@ -107,33 +116,12 @@ func InitLogger(logDir string, logLevel logrus.Level) {
 		os.Stdout,
 		infoWriter,
 	)
-	log.SetOutput(mw)
+	logx.SetOutput(mw)
 
 	// 添加错误级别hook
-	log.AddHook(&ErrorHook{Writer: errorWriter})
+	logx.AddHook(&ErrorHook{Writer: errorWriter})
 
-	infoLog, err := rotatelogs.New(logDir+"/%Y%m%d.info.log",
-		rotatelogs.WithLinkName(logDir+"/info.log"),
-		rotatelogs.WithMaxAge(7*24*time.Hour),
-		rotatelogs.WithRotationTime(24*time.Hour),
-	)
-	if err != nil {
-		fmt.Println("init rotate log failed.")
-		panic(err)
-	}
-	//errorLog, err := rotatelogs.New(logDir+"/%Y%m%d.error.log",
-	//	rotatelogs.WithLinkName(logDir+"error.log"),
-	//	rotatelogs.WithMaxAge(7*24*time.Hour),
-	//	rotatelogs.WithRotationTime(24*time.Hour),
-	//)
-	//if err != nil {
-	//	fmt.Println("init rotate log failed.")
-	//	panic(err)
-	//}
-
-	log.SetOutput(io.MultiWriter(os.Stdout, infoLog))
-	//log.SetOutput(io.MultiWriter(os.Stderr, errorLog))
-	log.Info("log init success")
+	logx.Info("log init success")
 }
 
 // 创建分割日志writer
@@ -170,4 +158,150 @@ func (hook *ErrorHook) Fire(entry *logrus.Entry) error {
 	}
 	_, err = hook.Writer.Write(line)
 	return err
+}
+
+type LoggerWrapper struct {
+	*logrus.Logger
+	_name string
+}
+
+func (l *LoggerWrapper) Log(level hclog.Level, msg string, args ...interface{}) {
+	entry := l.WithFields(toFields(args...))
+	switch level {
+	case hclog.Trace:
+		entry.Trace(msg)
+	case hclog.Debug:
+		entry.Debug(msg)
+	case hclog.Info:
+		entry.Info(msg)
+	case hclog.Warn:
+		entry.Warn(msg)
+	case hclog.Error:
+		entry.Error(msg)
+	}
+}
+
+func (l *LoggerWrapper) Trace(msg string, args ...interface{}) {
+	l.WithFields(toFields(args...)).Trace(msg)
+}
+
+func (l *LoggerWrapper) Debug(msg string, args ...interface{}) {
+	l.WithFields(toFields(args...)).Debug(msg)
+}
+
+func (l *LoggerWrapper) Info(msg string, args ...interface{}) {
+	l.WithFields(toFields(args...)).Info(msg)
+}
+
+func (l *LoggerWrapper) Warn(msg string, args ...interface{}) {
+	l.WithFields(toFields(args...)).Warn(msg)
+}
+
+func (l *LoggerWrapper) Error(msg string, args ...interface{}) {
+	l.WithFields(toFields(args...)).Error(msg)
+}
+
+func (l *LoggerWrapper) IsTrace() bool {
+	return l.Level >= logrus.TraceLevel
+}
+
+func (l *LoggerWrapper) IsDebug() bool {
+	return l.Level >= logrus.DebugLevel
+}
+
+func (l *LoggerWrapper) IsInfo() bool {
+	return l.Level >= logrus.InfoLevel
+}
+
+func (l *LoggerWrapper) IsWarn() bool {
+	return l.Level >= logrus.WarnLevel
+}
+
+func (l *LoggerWrapper) IsError() bool {
+	return l.Level >= logrus.ErrorLevel
+}
+
+func (l *LoggerWrapper) ImpliedArgs() []interface{} {
+	return []interface{}{}
+}
+
+func (l *LoggerWrapper) With(args ...interface{}) hclog.Logger {
+	return hclog.New(&hclog.LoggerOptions{})
+}
+
+func (l *LoggerWrapper) Name() string {
+	return l._name
+}
+
+func (l *LoggerWrapper) SetName(name string) {
+	l._name = name
+}
+
+func (l *LoggerWrapper) Named(name string) hclog.Logger {
+	return hclog.New(&hclog.LoggerOptions{Name: name})
+}
+
+func (l *LoggerWrapper) ResetNamed(name string) hclog.Logger {
+	return hclog.New(&hclog.LoggerOptions{Name: name})
+}
+
+func (l *LoggerWrapper) SetLevel(level hclog.Level) {
+	l.Logger.SetLevel(logrus.Level(level))
+}
+
+func (l *LoggerWrapper) GetLevel() hclog.Level {
+	return hclog.Level(l.Logger.Level)
+}
+
+func (l *LoggerWrapper) StandardLogger(opts *hclog.StandardLoggerOptions) *log.Logger {
+	if opts == nil {
+		opts = &hclog.StandardLoggerOptions{}
+	}
+	writer := &logrusWriter{
+		logger: l.Logger,
+		level:  logrus.InfoLevel, // 默认使用 Info 级别
+	}
+	return log.New(writer, l._name, 0)
+}
+
+func (l *LoggerWrapper) StandardWriter(opts *hclog.StandardLoggerOptions) io.Writer {
+	return l.Out
+}
+
+func toFields(args ...interface{}) logrus.Fields {
+	fields := make(logrus.Fields)
+	for i := 0; i < len(args); i += 2 {
+		if i+1 < len(args) {
+			fields[fmt.Sprint(args[i])] = args[i+1]
+		} else {
+			fields[fmt.Sprint(args[i])] = ""
+		}
+	}
+	return fields
+}
+
+type logrusWriter struct {
+	logger *logrus.Logger
+	level  logrus.Level
+}
+
+func (w *logrusWriter) Write(p []byte) (n int, err error) {
+	msg := string(p)
+	switch w.level {
+	case logrus.TraceLevel:
+		w.logger.Trace(msg)
+	case logrus.DebugLevel:
+		w.logger.Debug(msg)
+	case logrus.InfoLevel:
+		w.logger.Info(msg)
+	case logrus.WarnLevel:
+		w.logger.Warn(msg)
+	case logrus.ErrorLevel:
+		w.logger.Error(msg)
+	case logrus.FatalLevel:
+		w.logger.Fatal(msg)
+	case logrus.PanicLevel:
+		w.logger.Panic(msg)
+	}
+	return len(p), nil
 }

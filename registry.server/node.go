@@ -125,6 +125,8 @@ func (n *Node) Shutdown() {
 	n.grpcServer.GracefulStop()
 	n.socket.Close()
 
+	close(n.shutDownCh)
+
 	// wait for the server to shut down
 	time.Sleep(time.Second)
 	common.Info("server is down gracefully.")
@@ -158,7 +160,7 @@ func StartGRPCServer(addr string, shutDownCh chan struct{}, serverCh chan *GrpcS
 	sock, err := net.Listen("tcp", addr)
 	if err != nil {
 		common.Errorf("failed to listen: %v", err)
-		close(shutDownCh)
+		shutDownCh <- struct{}{}
 		return
 	}
 
@@ -175,7 +177,7 @@ func StartGRPCServer(addr string, shutDownCh chan struct{}, serverCh chan *GrpcS
 	// start grpc server，enter an infinite loop after the startup is complete
 	if err := grpcServer.Serve(sock); err != nil {
 		common.Errorf("grpc server failed to serve: %v", err)
-		close(shutDownCh)
+		shutDownCh <- struct{}{}
 	}
 }
 

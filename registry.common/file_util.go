@@ -17,7 +17,7 @@ func calcFileChecksum(filePath string) (uint32, error) {
 	defer func(f *os.File) {
 		err := f.Close()
 		if err != nil {
-			log.Errorf("Error closing file: %v", err)
+			logx.Errorf("Error closing file: %v", err)
 		}
 	}(f)
 
@@ -38,7 +38,7 @@ func CreateFile(path string) error {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Errorf("failed to close file %v", path)
+			logx.Errorf("failed to close file %v", path)
 		}
 	}(file)
 	return nil
@@ -53,7 +53,7 @@ func saveJsonFile(filePath string, obj any) error {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Errorf("failed to close file %s, %v", filePath, err)
+			logx.Errorf("failed to close file %s, %v", filePath, err)
 		}
 	}(file)
 	_, err = file.Write(bytes)
@@ -80,7 +80,7 @@ func PersistToJsonFileWithCheckSum(filePath string, content any) error {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Errorf("failed to close file %s, %v", filePath, err)
+			logx.Errorf("failed to close file %s, %v", filePath, err)
 		}
 	}(file)
 
@@ -119,7 +119,7 @@ func ReadJsonFileWithCheckSum(filePath string) (string, error) {
 	defer func(file *os.File) {
 		err := file.Close()
 		if err != nil {
-			log.Errorf("failed to close file %s, %v", filePath, err)
+			logx.Errorf("failed to close file %s, %v", filePath, err)
 		}
 	}(file)
 

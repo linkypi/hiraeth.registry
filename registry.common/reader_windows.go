@@ -63,18 +63,18 @@ func (r *WinReader) Receive(handleEvent HandleReceiveEvent, onConnClosed ConnClo
 			}
 			_ = r.conn.SetReadDeadline(time.Time{})
 			addr := r.conn.RemoteAddr().String()
-			log.Warnf("remote connection is closed: %s", addr)
+			logx.Warnf("remote connection is closed: %s", addr)
 
 			// close the old connection
 			err := r.conn.Close()
 			if err != nil {
-				log.Warnf("close old connection failed: %s, %v", addr, err)
+				logx.Warnf("close old connection failed: %s, %v", addr, err)
 			}
 			err = r.workPool.Submit(func() {
 				onConnClosed(stdErr, addr)
 			})
 			if err != nil {
-				log.Errorf("failed to submit conn closed event task to pool: %v", err)
+				logx.Errorf("failed to submit conn closed event task to pool: %v", err)
 			}
 			break
 		}
@@ -82,7 +82,7 @@ func (r *WinReader) Receive(handleEvent HandleReceiveEvent, onConnClosed ConnClo
 		_ = r.conn.SetReadDeadline(time.Time{})
 
 		if bytesRead == 0 {
-			log.Warnf("connection closed by server")
+			logx.Warnf("connection closed by server")
 			continue
 		}
 
@@ -106,11 +106,11 @@ func (r *WinReader) onCallback(callback HandleReceiveEvent, readErr error) {
 	err := r.workPool.Submit(func() {
 		buf, err := r.codec.DecodeFor(data)
 		if err != nil {
-			log.Errorf("Decode error:%v", err)
+			logx.Errorf("Decode error:%v", err)
 		}
 		callback(buf, con, err)
 	})
 	if err != nil {
-		log.Errorf("failed to submit read callback task to pool: %v", err)
+		logx.Errorf("failed to submit read callback task to pool: %v", err)
 	}
 }

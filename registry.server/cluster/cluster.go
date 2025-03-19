@@ -27,7 +27,7 @@ func NewCluster(conf *config.Config, selfNode *config.NodeInfo, slotManager *slo
 	net *network.Manager, shutDownCh chan struct{}) *Cluster {
 
 	cluster := Cluster{
-		BaseCluster: NewBaseCluster(conf, selfNode, slotManager, net, shutDownCh),
+		BaseCluster: NewBaseCluster(conf, selfNode, slotManager, shutDownCh),
 	}
 
 	for id, node := range conf.ClusterConfig.ClusterServers {

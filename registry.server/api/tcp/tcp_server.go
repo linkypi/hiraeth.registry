@@ -56,7 +56,7 @@ func NewClientTcpServer(addr string, codec gnet.ICodec, cl *cluster.Cluster, sta
 }
 
 func (s *Server) OnInitComplete(srv gnet.Server) (action gnet.Action) {
-	common.Infof("client tcp server is listening on %s (multi-cores: %t, loops: %d)\n",
+	common.Infof("client tcp server is listening on %s (multi-cores: %t, loops: %d)",
 		srv.Addr.String(), srv.Multicore, srv.NumEventLoop)
 	return
 }
@@ -175,7 +175,7 @@ func (s *Server) initSnowFlake(nodeId string) bool {
 	err = common.InitSnowFlake("", int64(machineId))
 	if err != nil {
 		common.Errorf("init snowflake failed, err: %v", err)
-		close(s.shutDownCh)
+		s.shutDownCh <- struct{}{}
 		return false
 	}
 	return true
@@ -209,5 +209,5 @@ func (s *Server) startTcpServer(addr string) {
 
 func (s *Server) Shutdown() {
 	s.netManager.CloseAllConn()
-	close(s.shutDownCh)
+	s.shutDownCh <- struct{}{}
 }

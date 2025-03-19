@@ -69,7 +69,7 @@ func (b *BuildInFixedLengthCodec) DecodeFor(data []byte) ([]byte, error) {
 	headerLen := DefaultHeadLength // uint16 + uint32
 	size := len(data)
 	if size < headerLen {
-		log.Warnf("not enough header data len: %d", size)
+		logx.Warnf("not enough header data len: %d", size)
 		return nil, gerr.ErrIncompletePacket
 	}
 
@@ -82,12 +82,12 @@ func (b *BuildInFixedLengthCodec) DecodeFor(data []byte) ([]byte, error) {
 
 	// to check the protocol version, reset buffer if the version  is not correct
 	if dataLength < 1 {
-		log.Warnf("not enough data len: %d", dataLength)
+		logx.Warnf("not enough data len: %d", dataLength)
 		return nil, errors.New("not normal protocol")
 	}
 
 	if pbVersion != DefaultProtocolVersion {
-		log.Warnf("The protocol version do not match: %d, should be %d", pbVersion, DefaultProtocolVersion)
+		logx.Warnf("The protocol version do not match: %d, should be %d", pbVersion, DefaultProtocolVersion)
 		return nil, errors.New("not normal protocol")
 	}
 
@@ -98,7 +98,7 @@ func (b *BuildInFixedLengthCodec) DecodeFor(data []byte) ([]byte, error) {
 		// return the payload of the data
 		return data[headerLen:], nil
 	}
-	log.Warnf("not enough payload data, the actual number of bytes read is %d, should be: %d", readLen, dataLen)
+	logx.Warnf("not enough payload data, the actual number of bytes read is %d, should be: %d", readLen, dataLen)
 	return nil, gerr.ErrIncompletePacket
 }
 
@@ -111,7 +111,7 @@ func (b *BuildInFixedLengthCodec) Decode(c gnet.Conn) ([]byte, error) {
 		return nil, gerr.ErrIncompletePacket
 	}
 	if size < headerLen {
-		log.Warnf("not enough header data len: %d", size)
+		logx.Warnf("not enough header data len: %d", size)
 		return nil, gerr.ErrIncompletePacket
 	}
 
@@ -128,7 +128,7 @@ func (b *BuildInFixedLengthCodec) Decode(c gnet.Conn) ([]byte, error) {
 
 	if pbVersion != DefaultProtocolVersion {
 		c.ResetBuffer()
-		log.Warnf("The protocol version do not match: %d, should be %d", pbVersion, DefaultProtocolVersion)
+		logx.Warnf("The protocol version do not match: %d, should be %d", pbVersion, DefaultProtocolVersion)
 		return nil, errors.New("not normal protocol")
 	}
 
@@ -140,6 +140,6 @@ func (b *BuildInFixedLengthCodec) Decode(c gnet.Conn) ([]byte, error) {
 		// return the payload of the data
 		return data[headerLen:], nil
 	}
-	log.Warnf("not enough payload data, the actual number of bytes read is %d, should be: %d", dataLen, protocolLen)
+	logx.Warnf("not enough payload data, the actual number of bytes read is %d, should be: %d", dataLen, protocolLen)
 	return nil, gerr.ErrIncompletePacket
 }

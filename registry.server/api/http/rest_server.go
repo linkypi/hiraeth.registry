@@ -46,7 +46,7 @@ func (s *RestServer) Start() {
 	wsContainer.Filter(wsContainer.OPTIONSFilter)
 	server := &http.Server{Addr: s.addr, Handler: wsContainer}
 
-	common.Infof("start http server on: %s\n", s.addr)
+	common.Infof("start http server on: %s", s.addr)
 	err := server.ListenAndServe()
 	if err != nil {
 		s.shutDown()

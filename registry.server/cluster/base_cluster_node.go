@@ -44,13 +44,13 @@ func (b *BaseCluster) startRaftNode(dataDir string) {
 		peers = append(peers, server)
 	}
 
-	raftFsm, err := raftNode.Start(selfNode.Id, dataDir, peers, *b.Config, b.notifyCh, propFsm)
+	err := raftNode.Start(selfNode.Id, dataDir, peers, *b.Config, b.notifyCh, propFsm)
 	if err != nil {
 		common.Errorf("failed to start raft node: %v", err.Error())
 		b.Shutdown()
 		return
 	}
-	b.Raft = raftFsm
+	b.Raft = &raftNode
 	common.Infof("raft node started.")
 }
 
@@ -268,6 +268,7 @@ func (b *BaseCluster) connectOtherCandidateNodes() {
 }
 
 func (b *BaseCluster) Shutdown() {
+	common.Infof("shutting down cluster node")
 	if b.Raft != nil {
 		future := b.Raft.Shutdown()
 		err := future.Error()
@@ -280,7 +281,7 @@ func (b *BaseCluster) Shutdown() {
 	if err != nil {
 		common.Errorf("close all connections failed: %v", err)
 	}
-	close(b.ShutDownCh)
+	b.ShutDownCh <- struct{}{}
 	time.Sleep(time.Second)
 }
 
@@ -344,11 +345,9 @@ func (b *BaseCluster) getRemoteNodeInfo(remoteNode *config.NodeInfo) {
 
 	// handle the problem of cluster configuration mismatch when updating remote node
 	// if the cluster configuration does not match, it will exit directly
-	defer func() {
-		if r := recover(); r != nil {
-			b.Shutdown()
-		}
-	}()
+	defer common.PrintStackTraceWithCallback(func(err any) {
+		b.Shutdown()
+	})
 
 	retries := 0
 	for {
@@ -391,7 +390,7 @@ func (b *BaseCluster) getRemoteNodeInfo(remoteNode *config.NodeInfo) {
 			return
 		}
 
-		remoteNode := config.NodeInfo{
+		rn := config.NodeInfo{
 			Id:                    remote.NodeId,
 			Ip:                    remote.NodeIp,
 			Addr:                  remote.NodeIp + ":" + strconv.Itoa(int(remote.InternalPort)),
@@ -403,10 +402,7 @@ func (b *BaseCluster) getRemoteNodeInfo(remoteNode *config.NodeInfo) {
 		}
 
 		// update cluster node config
-		_ = b.UpdateRemoteNode(remoteNode, *b.SelfNode, true)
-
-		// update raft node
-
+		_ = b.UpdateRemoteNode(rn, *b.SelfNode, true)
 		return
 	}
 }

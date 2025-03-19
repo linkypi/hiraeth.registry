@@ -39,6 +39,11 @@ func (c *ClusterRpcService) replyNodeInfo(req *pb.NodeInfoRequest) (*pb.NodeInfo
 
 	remoteNode := buildNodeInfo(req)
 	node := c.cluster.SelfNode
+
+	var appliedIndex uint64
+	if c.cluster.Raft != nil {
+		appliedIndex = c.cluster.Raft.AppliedIndex()
+	}
 	mode := pb.StartupMode_Cluster
 	if c.config.StartupMode == config.StandAlone {
 		mode = pb.StartupMode_StandAlone
@@ -52,6 +57,7 @@ func (c *ClusterRpcService) replyNodeInfo(req *pb.NodeInfoRequest) (*pb.NodeInfo
 		ExternalHttpPort:      uint32(node.ExternalHttpPort),
 		ExternalTcpPort:       uint32(node.ExternalTcpPort),
 		StartupMode:           mode,
+		AppliedIndex:          appliedIndex,
 	}
 
 	if c.config.StartupMode == config.StandAlone {

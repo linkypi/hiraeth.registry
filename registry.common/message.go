@@ -335,7 +335,7 @@ func Encode(obj any) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	enc := gob.NewEncoder(buf)
 	if err := enc.Encode(obj); err != nil {
-		log.Fatal("encode error:", err)
+		logx.Fatal("encode error:", err)
 	}
 	return buf.Bytes(), nil
 }

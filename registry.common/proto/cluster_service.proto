@@ -110,4 +110,5 @@ message NodeInfoResponse {
   StartupMode startupMode=6;
   uint32 ExternalTcpPort=7;
   uint32 ExternalHttpPort=8;
+  uint64 appliedIndex=9;
 }
