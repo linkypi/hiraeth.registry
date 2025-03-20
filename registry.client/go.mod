@@ -1,16 +1,18 @@
 module github.com/linkypi/hiraeth.registry/client
 
-go 1.20
+go 1.21
+
+toolchain go1.22.8
 
 require (
 	github.com/panjf2000/gnet v1.6.7
 	github.com/sirupsen/logrus v1.9.3
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.36.5
 )
 
 require (
 	github.com/bwmarrin/snowflake v0.3.0 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible // indirect
 	github.com/lestrrat-go/strftime v1.0.6 // indirect
 	github.com/panjf2000/ants/v2 v2.4.7 // indirect

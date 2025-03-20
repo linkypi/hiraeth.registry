@@ -1,11 +1,13 @@
 module github.com/linkypi/hiraeth.registry/server
 
-go 1.20
+go 1.21
+
+toolchain go1.22.8
 
 require (
 	github.com/emicklei/go-restful v2.16.0+incompatible
 	github.com/fatih/set v0.2.1
-	github.com/golang/protobuf v1.5.3
+	github.com/golang/protobuf v1.5.4
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/raft v1.6.0
 	github.com/hashicorp/raft-boltdb v0.0.0-20231211162105-6c830fa4535e
@@ -16,7 +18,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/sourcegraph/conc v0.3.0
 	google.golang.org/grpc v1.60.1
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.36.5
 )
 
 replace github.com/linkypi/hiraeth.registry/common => ../registry.common

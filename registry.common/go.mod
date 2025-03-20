@@ -1,6 +1,8 @@
 module github.com/linkypi/hiraeth.registry/common
 
-go 1.20
+go 1.21
+
+toolchain go1.22.8
 
 require (
 	github.com/bwmarrin/snowflake v0.3.0
@@ -11,12 +13,12 @@ require (
 	github.com/sourcegraph/conc v0.3.0
 	github.com/spaolacci/murmur3 v1.1.0
 	google.golang.org/grpc v1.60.1
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.36.5
 )
 
 require (
 	github.com/fatih/color v1.13.0 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/jonboulle/clockwork v0.4.0 // indirect
 	github.com/lestrrat-go/strftime v1.0.6 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
