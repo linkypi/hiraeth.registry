@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"errors"
 	"fmt"
 	"github.com/hashicorp/raft"
 	boltdb "github.com/hashicorp/raft-boltdb"
@@ -118,21 +119,55 @@ func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server, clusterCo
 	added, removed, changed := diffNodes(oldCfg.Servers, currentCfg.Servers)
 
 	// 记录节点差异详情
-	if len(added) > 0 {
-		common.Warnf("new nodes in configuration: %v", logNodes(added))
-	}
+
 	if len(removed) > 0 {
 		common.Warnf("removed nodes in configuration: %v", logNodes(removed))
+		//for _, server := range removed {
+		//	err := r.RemoveServer(server.ID, 0, time.Second*10).Error()
+		//	if err != nil {
+		//		common.Errorf("failed to remove server %s: %s", server.ID, server.Address, err)
+		//	}
+		//}
 	}
 	if len(changed) > 0 {
-		common.Warnf("changed nodes in configuration: %v", logChangedNodes(changed))
+		common.Errorf("changed nodes in configuration: %v", logChangedNodes(changed, currentCfg.Servers))
+		return errors.New("cluster node has changed")
+		//for _, server := range changed {
+		//	err := r.RemoveServer(server.ID, 0, time.Second*10).Error()
+		//	if err != nil && err.Error() != "ignore" {
+		//		common.Errorf("failed to remove server %s: %s", server.ID, server.Address, err)
+		//	}
+		//}
+		//
+		//// 找到新id对的节点
+		//for _, server := range changed {
+		//	for _, newServer := range currentCfg.Servers {
+		//		if newServer.ID == server.ID {
+		//			err := r.AddVoter(newServer.ID, newServer.Address, 0, time.Second*10).Error()
+		//			if err != nil && err.Error() != "ignore" {
+		//				common.Errorf("failed to add server %s: %s", newServer.ID, newServer.Address, err)
+		//				return err
+		//			}
+		//			break
+		//		}
+		//	}
+		//}
 	}
-
+	if len(added) > 0 {
+		//for _, server := range added {
+		//	err := rn.addNode(server)
+		//	if err != nil {
+		//		common.Errorf("failed to remove server %s: %s, err: %v", server.ID, server.Address, err)
+		//		return err
+		//	}
+		//}
+		common.Warnf("new nodes in configuration: %v", logNodes(added))
+	}
 	// 计算总差异节点数
-	totalDiff := len(added) + len(removed) + len(changed)
-	if totalDiff > 0 {
-		common.Warnf("cluster configuration changed: %d nodes affected", totalDiff)
-	}
+	//totalDiff := len(added) + len(removed) + len(changed)
+	//if totalDiff > 0 {
+	//	common.Warnf("cluster configuration changed: %d nodes affected", totalDiff)
+	//}
 	// 计算节点差异率
 	//diffRatio := calculateConfigDiff(currentCfg.Servers, cfg.Servers)
 	//if diffRatio > 0.5 { // 超过50%节点变化则报错
@@ -142,7 +177,25 @@ func (rn *RaftNode) Start(nodeId, dataDir string, peers []raft.Server, clusterCo
 
 	return nil
 }
+func (rn *RaftNode) addNode(node raft.Server) error {
+	server := raft.Server{
+		ID:       node.ID,
+		Address:  node.Address,
+		Suffrage: raft.Voter,
+	}
 
+	// 使用正确的参数顺序和配置索引
+	err := rn.Raft.AddVoter(
+		server.ID,
+		server.Address,
+		0,              // 使用实际的最新配置索引
+		10*time.Second, // 添加合理的超时时间
+	).Error()
+	if err != nil {
+		return fmt.Errorf("failed to add voter, id: %v, addr: %v, err: %v", server.ID, server.Address, err)
+	}
+	return nil
+}
 func isSameConfiguration(a, b raft.Configuration) bool {
 	if len(a.Servers) != len(b.Servers) {
 		return false
@@ -222,11 +275,15 @@ func logNodes(servers []raft.Server) []string {
 	return res
 }
 
-func logChangedNodes(servers []raft.Server) []string {
+func logChangedNodes(oldServers, newServers []raft.Server) []string {
 	var res []string
-	for _, s := range servers {
-		res = append(res, fmt.Sprintf("[ID:%s OldAddr:%s NewAddr:%s]",
-			s.ID, s.Address, s.Address)) // 实际使用时需要新旧地址对比
+	for _, s := range oldServers {
+		for _, server := range newServers {
+			if s.ID == server.ID {
+				res = append(res, fmt.Sprintf("[ID:%s OldAddr:%s NewAddr:%s]",
+					s.ID, s.Address, server.Address))
+			}
+		}
 	}
 	return res
 }

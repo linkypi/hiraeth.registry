@@ -31,30 +31,30 @@ type MetaData struct {
 
 func (m *MetaData) ToJSON() (string, error) {
 	// 将 sync.Map 转换为普通 map
-	actualNodeMap := make(map[string]config.NodeInfo)
-	expectedNodeMap := make(map[string]config.NodeInfo)
+	actualNodeMap := make(map[string]*config.NodeInfo)
+	expectedNodeMap := make(map[string]*config.NodeInfo)
 	m.ActualNodeMap.Range(func(key, value interface{}) bool {
-		actualNodeMap[key.(string)] = value.(config.NodeInfo)
+		actualNodeMap[key.(string)] = value.(*config.NodeInfo)
 		return true
 	})
 	m.ExpectedNodeMap.Range(func(key, value interface{}) bool {
-		expectedNodeMap[key.(string)] = value.(config.NodeInfo)
+		expectedNodeMap[key.(string)] = value.(*config.NodeInfo)
 		return true
 	})
 	// 创建临时结构体用于序列化
 	temp := struct {
-		ClusterId       uint64                     `json:"clusterId"`
-		LeaderId        string                     `json:"leaderId"`
-		Term            uint64                     `json:"term"`
-		ExpectedNodeMap map[string]config.NodeInfo `json:"expectedNodeMap"`
-		ActualNodeMap   map[string]config.NodeInfo `json:"actualNodeMap"`
-		ActualNodes     []config.NodeInfo          `json:"actualNodes"`
-		State           string                     `json:"state"`
-		NodeConfig      config.NodeConfig          `json:"nodeConfig"`
-		ClusterConfig   config.ClusterConfig       `json:"clusterConfig"`
-		Shards          map[string]common.Shard    `json:"shards"`
-		Replicas        map[string][]common.Shard  `json:"replicas"`
-		CreateTime      string                     `json:"createTime"`
+		ClusterId       uint64                      `json:"clusterId"`
+		LeaderId        string                      `json:"leaderId"`
+		Term            uint64                      `json:"term"`
+		ExpectedNodeMap map[string]*config.NodeInfo `json:"expectedNodeMap"`
+		ActualNodeMap   map[string]*config.NodeInfo `json:"actualNodeMap"`
+		ActualNodes     []config.NodeInfo           `json:"actualNodes"`
+		State           string                      `json:"state"`
+		NodeConfig      config.NodeConfig           `json:"nodeConfig"`
+		ClusterConfig   config.ClusterConfig        `json:"clusterConfig"`
+		Shards          map[string]common.Shard     `json:"shards"`
+		Replicas        map[string][]common.Shard   `json:"replicas"`
+		CreateTime      string                      `json:"createTime"`
 	}{
 		ClusterId:       m.ClusterId,
 		LeaderId:        m.LeaderId,
