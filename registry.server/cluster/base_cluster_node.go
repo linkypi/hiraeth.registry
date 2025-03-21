@@ -149,7 +149,10 @@ func (b *BaseCluster) notifyLeaderShipTransferStatus(node *config.NodeInfo, stat
 			return errors.New("failed to get rpc client")
 		}
 		response, err := (*rpcClient).TransferLeadership(context.Background(), &request)
-
+		if err != nil {
+			common.Warnf("failed to notify leadership transfer to [%s], id: %s, err: %+v", status.String(), node.Id, err)
+			return err
+		}
 		if response.ErrorType == pb.ErrorType_ClusterStateNotMatch {
 			common.Errorf("[leader] failed to trasnfer leadership [%s] to %s:%s, cluster state not match: %s",
 				status.String(), node.Id, node.Addr, response.ClusterState)
@@ -285,9 +288,9 @@ func (b *BaseCluster) Shutdown() {
 	time.Sleep(time.Second)
 }
 
-func (b *BaseCluster) ConnectToNode(remoteNode *config.NodeInfo) {
+func (b *BaseCluster) ConnectToNode(otherNode *config.NodeInfo) {
 
-	if remoteNode.Id == b.SelfNode.Id {
+	if otherNode.Id == b.SelfNode.Id {
 		return
 	}
 	retries := 1
@@ -307,9 +310,9 @@ func (b *BaseCluster) ConnectToNode(remoteNode *config.NodeInfo) {
 			return
 		default:
 		}
-		conn, err := grpc.Dial(remoteNode.Addr, grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
+		conn, err := grpc.Dial(otherNode.Addr, grpc.WithInsecure(), grpc.WithKeepaliveParams(kacp))
 		if err != nil {
-			common.Errorf("failed to dial server: %s, retry time: %d. %v", remoteNode.Addr, retries, err)
+			common.Errorf("failed to dial server: %s, retry time: %d. %v", otherNode.Addr, retries, err)
 			retries++
 			time.Sleep(time.Second)
 			continue
@@ -321,27 +324,86 @@ func (b *BaseCluster) ConnectToNode(remoteNode *config.NodeInfo) {
 		conn.WaitForStateChange(ctx, connectivity.Connecting)
 
 		if conn.GetState() == connectivity.Ready {
-			common.Infof("connected to node: %s, %s", remoteNode.Id, remoteNode.Addr)
+			common.Infof("connected to node: %s, %s", otherNode.Id, otherNode.Addr)
 
 			// record remote connection
 			clusterServiceClient := pb.NewClusterServiceClient(conn)
 			raftTransportClient := pb.NewRaftTransportClient(conn)
-			b.AddConn(remoteNode.Id, remoteNode.Addr, conn, &clusterServiceClient, &raftTransportClient)
-			b.getRemoteNodeInfo(remoteNode)
+			b.AddConn(otherNode.Id, otherNode.Addr, conn, &clusterServiceClient, &raftTransportClient)
+			remoteNode := b.getRemoteNodeInfo(otherNode)
+			if remoteNode == nil {
+				var rn = &config.NodeInfo{
+					Id:                    remoteNode.NodeId,
+					Ip:                    remoteNode.NodeIp,
+					Addr:                  remoteNode.NodeIp + ":" + strconv.Itoa(int(remoteNode.InternalPort)),
+					InternalPort:          int(remoteNode.InternalPort),
+					IsCandidate:           remoteNode.IsCandidate,
+					AutoJoinClusterEnable: remoteNode.AutoJoinClusterEnable,
+					ExternalHttpPort:      int(remoteNode.ExternalHttpPort),
+					ExternalTcpPort:       int(remoteNode.ExternalTcpPort),
+				}
+				// update cluster node config
+				_ = b.UpdateRemoteNode(rn, *b.SelfNode, true)
+				return
+			}
+			if remoteNode.StartupMode == pb.StartupMode_StandAlone {
+				common.Errorf("remote node %s is in standalone mode, can't join the cluster", remoteNode.NodeId)
+				return
+			}
+			b.joinRequestMtx.Lock()
+			if remoteNode.LeaderId == b.lastJoinRequestLeaderId && remoteNode.Term == b.lastJoinRequestTerm {
+				b.joinRequestMtx.Unlock()
+				return
+			}
+
+			// If the remote node has joined the cluster, the current node must request the leader node to join the cluster
+			if remoteNode.ClusterState == pb.ClusterState_ACTIVE && !b.joinToExistCluster(remoteNode) {
+				b.joinRequestMtx.Unlock()
+				return
+			}
+			b.joinRequestMtx.Unlock()
 			return
 		}
 
 		time.Sleep(5 * time.Second)
 
 		if time.Now().Sub(printTime).Seconds() > 30 {
-			common.Warnf("[heartbeat] waiting for %s:%s to be ready", remoteNode.Id, remoteNode.Addr)
+			common.Warnf("[heartbeat] waiting for %s:%s to be ready", otherNode.Id, otherNode.Addr)
 			printTime = time.Now()
 		}
 	}
 }
 
+func (b *BaseCluster) joinToExistCluster(remoteNode *pb.NodeInfoResponse) bool {
+	leaderConn, err := b.Manager.GetConnByAddr(remoteNode.LeaderAddr)
+	if err != nil {
+		common.Errorf("failed to get leader connection: %v", err)
+		b.ShutDownCh <- struct{}{}
+		return false
+	}
+	request := pb.JoinClusterRequest{
+		NodeId:                b.SelfNode.Id,
+		NodeAddr:              b.SelfNode.Addr,
+		AutoJoinClusterEnable: b.SelfNode.AutoJoinClusterEnable,
+		IsCandidate:           b.SelfNode.IsCandidate,
+	}
+	timeout, c := context.WithTimeout(context.Background(), 5*time.Second)
+	defer c()
+	_, err = (*leaderConn.PeerClient).JoinCluster(timeout, &request)
+	if err != nil {
+		common.Errorf("failed to join cluster, leader node: %v, err: %v", remoteNode.LeaderAddr, err)
+		b.ShutDownCh <- struct{}{}
+		return false
+	}
+
+	b.lastJoinRequestLeaderId = remoteNode.LeaderId
+	b.lastJoinRequestTerm = remoteNode.Term
+	common.Infof("join cluster success, leader node: %v", remoteNode.LeaderAddr)
+	return true
+}
+
 // exchange information between the two nodes in preparation for the creation of a myCluster
-func (b *BaseCluster) getRemoteNodeInfo(remoteNode *config.NodeInfo) {
+func (b *BaseCluster) getRemoteNodeInfo(remoteNode *config.NodeInfo) *pb.NodeInfoResponse {
 
 	// handle the problem of cluster configuration mismatch when updating remote node
 	// if the cluster configuration does not match, it will exit directly
@@ -353,7 +415,7 @@ func (b *BaseCluster) getRemoteNodeInfo(remoteNode *config.NodeInfo) {
 	for {
 		select {
 		case <-b.ShutDownCh:
-			return
+			return nil
 		default:
 		}
 		currentNode := b.SelfNode
@@ -387,23 +449,9 @@ func (b *BaseCluster) getRemoteNodeInfo(remoteNode *config.NodeInfo) {
 			if err != nil {
 				common.Errorf("failed to close the remote connection of node [%s][%s], %v", remoteNode.Id, remoteNode.Addr, err)
 			}
-			return
+			return nil
 		}
-
-		rn := config.NodeInfo{
-			Id:                    remote.NodeId,
-			Ip:                    remote.NodeIp,
-			Addr:                  remote.NodeIp + ":" + strconv.Itoa(int(remote.InternalPort)),
-			InternalPort:          int(remote.InternalPort),
-			IsCandidate:           remote.IsCandidate,
-			AutoJoinClusterEnable: remote.AutoJoinClusterEnable,
-			ExternalHttpPort:      int(remote.ExternalHttpPort),
-			ExternalTcpPort:       int(remote.ExternalTcpPort),
-		}
-
-		// update cluster node config
-		_ = b.UpdateRemoteNode(rn, *b.SelfNode, true)
-		return
+		return remote
 	}
 }
 

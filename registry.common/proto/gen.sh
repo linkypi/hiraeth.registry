@@ -14,7 +14,14 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@$PROTOC_GEN_GO_VERSION
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$PROTOC_GEN_GO_GRPC_VERSION
 export PATH="$PATH:$(go env GOPATH)/bin"
 
+# 获取输入参数，如果没有参数则生成全部 .proto 文件
+if [ $# -eq 0 ]; then
+  FILES="*.proto"
+else
+  FILES="$@"
+fi
+
 # 生成代码
 protoc --go_out=. --go_opt=paths=source_relative \
        --go-grpc_out=. --go-grpc_opt=paths=source_relative,require_unimplemented_servers=false \
-       *.proto
+       $FILES

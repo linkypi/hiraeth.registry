@@ -29,6 +29,24 @@ enum RequestType {
   SubService = 3;
   FetchServiceInstance = 4;
 }
+enum ClusterState {
+  NONE_STATE = 0;
+  INITIALIZING = 1;
+  // Active The cluster is active and can be read and written to
+  ACTIVE = 2;
+  // Transitioning The cluster is transitioning to a new state
+  // In this process, the cluster will resize the data shards, just
+  // processes read requests and rejects write requests
+  TRANSITIONING = 3;
+  DOWN = 4;
+  // StandBy The cluster is in a standby state and can only be read
+  // It's possible that the cluster is electing a leader
+  STANDBY = 5;
+  // Maintenance The cluster is in a maintenance state and cannot be read or written
+  MAINTENANCE = 6;
+  UNKNOWN = 7;
+}
+
 message ForwardCliResponse {
   ErrorType errorType = 1;
   uint64 clusterId = 2;
@@ -111,4 +129,8 @@ message NodeInfoResponse {
   uint32 ExternalTcpPort=7;
   uint32 ExternalHttpPort=8;
   uint64 appliedIndex=9;
+  ClusterState clusterState=10;
+  string leaderId=11;
+  string leaderAddr=12;
+  uint64 term=13;
 }

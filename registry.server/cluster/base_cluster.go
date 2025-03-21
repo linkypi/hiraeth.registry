@@ -45,6 +45,11 @@ type BaseCluster struct {
 
 	OtherCandidateNodes []config.NodeInfo
 	joinCluster         bool
+
+	lastJoinRequestLeaderId string     // 记录最近一次发送加入集群请求的 Leader ID
+	lastJoinRequestTerm     uint64     // 记录最近一次发送加入集群请求的 Term
+	joinRequestMtx          sync.Mutex // 保护 lastJoinRequestLeaderId 和 lastJoinRequestTerm 的互斥锁
+
 }
 
 type State int
@@ -68,6 +73,46 @@ const (
 	Unknown
 )
 
+func (s State) ToClusterState() pb.ClusterState {
+	switch s {
+	case NoneState:
+		return pb.ClusterState_NONE_STATE
+	case Initializing:
+		return pb.ClusterState_INITIALIZING
+	case Active:
+		return pb.ClusterState_ACTIVE
+	case Transitioning:
+		return pb.ClusterState_TRANSITIONING
+	case Down:
+		return pb.ClusterState_DOWN
+	case StandBy:
+		return pb.ClusterState_STANDBY
+	case Maintenance:
+		return pb.ClusterState_MAINTENANCE
+	default:
+		return pb.ClusterState_UNKNOWN
+	}
+}
+func FromClusterState(state pb.ClusterState) State {
+	switch state {
+	case pb.ClusterState_NONE_STATE:
+		return NoneState
+	case pb.ClusterState_INITIALIZING:
+		return Initializing
+	case pb.ClusterState_ACTIVE:
+		return Active
+	case pb.ClusterState_TRANSITIONING:
+		return Transitioning
+	case pb.ClusterState_DOWN:
+		return Down
+	case pb.ClusterState_STANDBY:
+		return StandBy
+	case pb.ClusterState_MAINTENANCE:
+		return Maintenance
+	default:
+		return Unknown
+	}
+}
 func (s State) String() string {
 	names := [...]string{"NoneState", "Initializing", "Active", "Transitioning", "Down", "StandBy", "Maintenance", "Unknown"}
 	if s < 0 || s > State(len(names)-1) {
@@ -209,7 +254,7 @@ func (b *BaseCluster) RemoveNode(nodeId string) {
 	b.ClusterExpectedNodes.Delete(nodeId)
 }
 
-func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode config.NodeInfo, throwEx bool) error {
+func (b *BaseCluster) UpdateRemoteNode(remoteNode *config.NodeInfo, selfNode config.NodeInfo, throwEx bool) error {
 
 	if remoteNode.Id == selfNode.Id {
 		msg := fmt.Sprintf("[cluster] the remote node id [%s][%s] conflicts with the current node id [%s][%s]",
@@ -230,7 +275,7 @@ func (b *BaseCluster) UpdateRemoteNode(remoteNode config.NodeInfo, selfNode conf
 		b.ClusterExpectedNodes.Store(remoteNode.Id, &remoteNode)
 		b.ClusterActualNodes.Store(remoteNode.Id, &remoteNode)
 		if remoteNode.IsCandidate {
-			b.OtherCandidateNodes = append(b.OtherCandidateNodes, remoteNode)
+			b.OtherCandidateNodes = append(b.OtherCandidateNodes, *remoteNode)
 		}
 	} else {
 		nd := node.(*config.NodeInfo)

@@ -65,12 +65,22 @@ func (c *ClusterRpcService) replyNodeInfo(req *pb.NodeInfoRequest) (*pb.NodeInfo
 		return response, nil
 	}
 
+	if c.cluster.Raft != nil {
+		leaderAddr, leaderId := c.cluster.Raft.LeaderWithID()
+		response.LeaderId = string(leaderId)
+		response.LeaderAddr = string(leaderAddr)
+		response.ClusterState = c.cluster.State.ToClusterState()
+		if c.cluster.Leader != nil {
+			response.Term = c.cluster.Leader.Term
+		}
+	}
+
 	// it is very likely that the information of the remote node
 	// is not in the current cluster configuration, such as the newly joined node
 	// in this case, the current node needs to actively connect to the node in order
 	// to maintain a persistent connection between them when the node
 	// has sent the command to join the cluster
-	err := c.cluster.UpdateRemoteNode(remoteNode, *c.cluster.SelfNode, false)
+	err := c.cluster.UpdateRemoteNode(&remoteNode, *c.cluster.SelfNode, false)
 	if err != nil {
 		return &pb.NodeInfoResponse{}, err
 	}
