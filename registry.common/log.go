@@ -10,6 +10,8 @@ import (
 	"log"
 	"os"
 	"path"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -82,9 +84,7 @@ func (t Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 	}
 
 	if entry.HasCaller() {
-		// customize the file path
-		//funcName := entry.Caller.Function
-		filePath := fmt.Sprintf("%s:%d", path.Base(entry.Caller.File), entry.Caller.Line)
+		filePath := getActualCaller(entry)
 		// customize the output format
 		fmt.Fprintf(buffer, "[%s] \033[%dm[%s]\033[0m %s [%d] %s%s \n", timestamp,
 			levelColor, entry.Level, filePath, id, entry.Message, customFields)
@@ -94,6 +94,20 @@ func (t Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 			timestamp, levelColor, entry.Level, entry.Message, customFields)
 	}
 	return buffer.Bytes(), nil
+}
+func getActualCaller(entry *logrus.Entry) string {
+	// 在调用栈中查找第一个非common包的调用者
+	for skip := 5; skip < 10; skip++ {
+		_, file, line, ok := runtime.Caller(skip)
+		if ok && !strings.Contains(file, "registry.common") && !strings.Contains(file, "logrus") {
+			return fmt.Sprintf("%s:%d", path.Base(file), line)
+		}
+	}
+	if !strings.Contains(entry.Caller.File, "logrus") {
+		return fmt.Sprintf("%s:%d", path.Base(entry.Caller.File), entry.Caller.Line)
+	}
+	// 最终保底返回空值
+	return "unknown:0"
 }
 
 // InitLogger init logrus
